@@ -231,7 +231,8 @@ app.get('/api/state', (req, res) => {
   res.json({
     setupNeeded: userCount() === 0, setupCodeRequired: !!SETUP_CODE, user: publicUser(req.user), settings: settingsObj(),
     unread: req.user && !req.user.mustChangePassword ? unreadCount(req.user.id) : 0,
-    inbox: req.user && req.user.role === 'admin' && !req.user.mustChangePassword ? inboxCounts() : null
+    inbox: req.user && req.user.role === 'admin' && !req.user.mustChangePassword ? inboxCounts() : null,
+    ...(req.user ? { categories: cats.allCats(), fieldDefs: cats.FIELD_DEFS, units: cats.UNITS, icons: cats.ICONS } : {})
   });
 });
 
@@ -299,6 +300,7 @@ function itemOut(r) {
     id: r.id, type: r.type, name: r.name, quantity: r.quantity, location: r.location, description: r.description,
     photoUrl: r.photo ? 'api/photos/' + r.photo : '', thumbUrl: r.thumb ? 'api/photos/' + r.thumb : '',
     createdAt: r.created_at, createdByName: r.created_by_name || '', updatedAt: r.updated_at, updatedByName: r.updated_by_name || '',
+    ...cats.materialOut(r),
     ...(r.type === 'equipment' ? {
       meterUnit: r.meter_unit || 'hours', meterValue: r.meter_value, meterUpdatedAt: r.meter_updated_at, meterUpdatedByName: r.meter_updated_by_name || '',
       repairStatus: repairStatusOf(r.id)
@@ -331,15 +333,25 @@ const getAnyItem = id => db.prepare('SELECT * FROM items WHERE id = ?').get(Stri
 // "Important" kinds (default filter). Pushed to admins: PUSH_KINDS.
 const KEY_KINDS = ['add', 'delete', 'restore', 'approval', 'repair', 'meter_low', 'request_result', 'repair_status'];
 const PUSH_KINDS = ['add', 'delete', 'restore', 'approval', 'repair'];
-const snapshotOf = r => ({ name: r.name, type: r.type, quantity: r.quantity, location: r.location, description: r.description, photo: r.photo, thumb: r.thumb });
+const snapshotOf = r => {
+  const s = { name: r.name, type: r.type, quantity: r.quantity, location: r.location, description: r.description, photo: r.photo, thumb: r.thumb };
+  if (r.type === 'material') {
+    const m = cats.materialOut(r);
+    Object.assign(s, { categoryName: m.categoryName, unit: m.unit, length: m.extra.length ?? null, lengthUnit: m.extra.lengthUnit || null });
+  }
+  return s;
+};
+// "24 bags" / "24" (unit "each" is not shown)
+const qtyText = (q, unit) => `${fmtNum(q)}${unit && unit !== 'each' ? ' ' + unit : ''}`;
 function recordEvent(kind, row, user, details, opts) {
   opts = opts || {};
   const t = now();
   // Many +/- taps by the same person on the same item within 10 minutes become one entry.
   if (kind === 'qty') {
     const last = db.prepare("SELECT * FROM events WHERE item_id = ? ORDER BY id DESC LIMIT 1").get(row.id);
-    if (last && last.kind === 'qty' && last.actor_id === user.id && t - last.created_at < 10 * 60 * 1000) {
-      details = { from: JSON.parse(last.details || '{}').from, to: details.to };
+    const ld = last ? JSON.parse(last.details || '{}') : {};
+    if (last && last.kind === 'qty' && last.actor_id === user.id && t - last.created_at < 10 * 60 * 1000 && (ld.field || 'qty') === (details.field || 'qty')) {
+      details = { ...details, from: ld.from };
       db.prepare('DELETE FROM events WHERE id = ?').run(last.id); // replaced by a fresh (unread) entry below
     }
   }
@@ -361,11 +373,16 @@ function unreadCount(userId) {
 function eventText(e, snap, d) {
   const what = ({ tool: 'tool', equipment: 'machine' })[snap.type] || 'material';
   const where = snap.location ? ` — ${snap.location}` : '';
+  const cat = snap.categoryName ? ` (${snap.categoryName})` : '';
+  const len = snap.length != null ? ` — ${fmtNum(snap.length)} ${snap.lengthUnit || 'ft'}` : '';
+  const line = `${snap.name}${cat} — Qty ${qtyText(snap.quantity, snap.unit)}${len}${where}`;
   switch (e.kind) {
-    case 'add': return { title: `${e.actor_name} added a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
-    case 'delete': return { title: `${e.actor_name} deleted a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
-    case 'restore': return { title: `${e.actor_name} restored a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
-    case 'qty': return { title: `${e.actor_name} changed a quantity`, body: `${snap.name}: ${fmtNum(d.from)} → ${fmtNum(d.to)}` };
+    case 'add': return { title: `${e.actor_name} added a ${what}`, body: line };
+    case 'delete': return { title: `${e.actor_name} deleted a ${what}`, body: line };
+    case 'restore': return { title: `${e.actor_name} restored a ${what}`, body: line };
+    case 'qty': return d.field === 'length'
+      ? { title: `${e.actor_name} changed a length`, body: `${snap.name}${cat}: ${fmtNum(d.from)} → ${fmtNum(d.to)} ${d.unit || 'ft'}` }
+      : { title: `${e.actor_name} changed a quantity`, body: `${snap.name}${cat}: ${fmtNum(d.from)} → ${fmtNum(d.to)}` };
     case 'meter_low': return { title: `${e.actor_name} entered LOWER ${d.unit} than before`, body: `${snap.name}: ${fmtNum(d.from)} → ${fmtNum(d.to)} ${d.unit}` };
     case 'record': return { title: `${e.actor_name} logged ${d.kind === 'repair' ? 'a repair' : 'maintenance'}`, body: `${snap.name}: ${d.work || ''}`.slice(0, 180) };
     case 'record_edit': return { title: `${e.actor_name} changed a ${d.kind === 'repair' ? 'repair' : 'maintenance'} record`, body: `${snap.name}: ${(d.changes || []).join(', ')}` };
@@ -416,11 +433,13 @@ app.post('/api/items', auth, (req, res) => {
   const files = req.body.photo ? savePhotos(req.body.photo, req.body.thumb) : { photo: null, thumb: null };
   const id = crypto.randomUUID();
   const t = now();
+  const mx = cats.readMaterial(req.body, v.type, null);
   const meter = v.type === 'equipment' && req.body.meterValue !== undefined && req.body.meterValue !== null && req.body.meterValue !== '' ? meterNum(req.body.meterValue) : null;
   try {
     db.transaction(() => {
       db.prepare(`INSERT INTO items (id, type, name, quantity, location, description, photo, thumb, created_at, created_by_name, updated_at, updated_by, updated_by_name, meter_unit)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, v.type, v.name, v.quantity, v.location, v.description, files.photo, files.thumb, t, req.user.name, t, req.user.id, req.user.name, v.meterUnit);
+      cats.applyMaterial(id, mx);
       if (meter !== null) addReading(id, meter, v.meterUnit, req.user, null);
     })();
   } catch (e) { removePhotoFiles(files.photo, files.thumb); throw e; }
@@ -443,8 +462,11 @@ app.put('/api/items/:id', auth, (req, res) => {
   if (v.description !== old.description) changes.push('description');
   if (photo !== old.photo) changes.push(photo ? (old.photo ? 'new photo' : 'added photo') : 'removed photo');
   if (old.type === 'equipment' && v.meterUnit !== (old.meter_unit || 'hours')) changes.push(`counts ${v.meterUnit}`);
+  const mx = cats.readMaterial(req.body, old.type, old);
+  changes.push(...cats.materialChanges(old, mx));
   db.prepare(`UPDATE items SET name=?, quantity=?, location=?, description=?, photo=?, thumb=?, updated_at=?, updated_by=?, updated_by_name=?, meter_unit=COALESCE(?, meter_unit) WHERE id=?`)
     .run(v.name, v.quantity, v.location, v.description, photo, thumb, now(), req.user.id, req.user.name, v.meterUnit, old.id);
+  cats.applyMaterial(old.id, mx);
   if (photo !== old.photo) removePhotoFiles(old.photo, old.thumb);
   const row = getItem(old.id);
   if (changes.length) recordEvent('edit', row, req.user, { changes });
@@ -519,7 +541,8 @@ app.get('/api/notifications', auth, (req, res) => {
       read: e.actor_id === req.user.id || e.id <= me.notif_read_upto || !!e.is_read, mine: e.actor_id === req.user.id,
       itemExists: !!e.item_exists, itemDeleted: !!e.item_deleted_at,
       thumbUrl: thumb ? 'api/photos/' + thumb : (e.kind === 'delete' && e.item_exists && snap.thumb ? 'api/photos/' + snap.thumb : ''),
-      snapshot: { name: snap.name, quantity: snap.quantity, location: snap.location, description: snap.description, type: snap.type },
+      snapshot: { name: snap.name, quantity: snap.quantity, location: snap.location, description: snap.description, type: snap.type,
+        categoryName: snap.categoryName || '', unit: snap.unit || 'each', length: snap.length ?? null, lengthUnit: snap.lengthUnit || null },
       details: d, text: eventText(e, snap, d), refId: e.ref_id, forMe: e.recipient_id === req.user.id,
       refStatus: refStatusOf(e)
     };
@@ -664,14 +687,15 @@ app.get('/api/backup', adminOnly, (req, res) => {
     id: r.id, type: r.type, name: r.name, quantity: r.quantity, location: r.location, description: r.description,
     photo: photoToDataUrl(r.photo), thumb: photoToDataUrl(r.thumb),
     createdAt: r.created_at, createdByName: r.created_by_name, updatedAt: r.updated_at, updatedByName: r.updated_by_name,
-    meterUnit: r.meter_unit, meterValue: r.meter_value, meterUpdatedAt: r.meter_updated_at, meterUpdatedByName: r.meter_updated_by_name
+    meterUnit: r.meter_unit, meterValue: r.meter_value, meterUpdatedAt: r.meter_updated_at, meterUpdatedByName: r.meter_updated_by_name,
+    ...(r.type === 'material' ? { categoryId: r.category_id, unit: r.unit || 'each', extra: cats.parseExtra(r.extra) } : {})
   }));
   const users = db.prepare('SELECT * FROM users').all().map(u => ({
     username: u.username, name: u.name, role: u.role, disabled: !!u.disabled, passwordHash: u.password_hash, createdAt: u.created_at
   }));
   const d = new Date().toISOString().slice(0, 10);
   res.set('Content-Disposition', `attachment; filename="inventory-backup-${d}.json"`);
-  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 3, exportedAt: new Date().toISOString(), settings: settingsObj(), users, items, equipment: equipment.exportData() }));
+  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 4, exportedAt: new Date().toISOString(), settings: settingsObj(), categories: cats.exportCats(), users, items, equipment: equipment.exportData() }));
 });
 
 app.post('/api/restore', adminOnly, (req, res) => {
@@ -679,9 +703,10 @@ app.post('/api/restore', adminOnly, (req, res) => {
   const list = Array.isArray(data) ? data : data && data.items;
   if (!Array.isArray(list)) throw bad('This is not an inventory backup file.');
   const isV1 = !(data && data.version >= 2);
-  let items = 0, people = 0, skipped = 0, eqCounts = { records: 0, repairs: 0 };
+  let items = 0, people = 0, skipped = 0, eqCounts = { records: 0, repairs: 0 }, categories = 0;
   const written = [];
   const tx = db.transaction(() => {
+    if (!isV1 && data.categories) categories = cats.importCats(data.categories);
     for (const raw of list) {
       try {
         if (!raw || typeof raw !== 'object') { skipped++; continue; }
@@ -701,6 +726,7 @@ app.post('/api/restore', adminOnly, (req, res) => {
           .run(id, v.type, v.name, v.quantity, v.location, v.description, files.photo, files.thumb, created,
             isV1 ? byName : (str(raw.createdByName, { max: 60 }) || byName), updated, byName,
             v.meterUnit, mv, mv !== null ? (Number(raw.meterUpdatedAt) || updated) : null, mv !== null ? (str(raw.meterUpdatedByName, { max: 60 }) || byName) : null);
+        cats.applyMaterial(id, cats.readMaterial(isV1 ? {} : raw, v.type, null));
         if (old) removePhotoFiles(old.photo, old.thumb);
         items++;
       } catch (e) { if (e instanceof HttpError) skipped++; else throw e; }
@@ -720,7 +746,7 @@ app.post('/api/restore', adminOnly, (req, res) => {
     }
   });
   try { tx(); } catch (e) { removePhotoFiles(...written); throw e; }
-  res.json({ items, people, skipped, fromOldVersion: isV1, records: eqCounts.records, repairs: eqCounts.repairs });
+  res.json({ items, people, skipped, fromOldVersion: isV1, records: eqCounts.records, repairs: eqCounts.repairs, categories });
 });
 
 // ---------- equipment: meter readings, maintenance records, change approvals, repair requests ----------
@@ -728,6 +754,8 @@ const equipment = require('./equipment')({
   app, db, auth, adminOnly, str, bad, HttpError, now, savePhotos, removePhotoFiles, photoToDataUrl, getItem, itemOut, recordEvent, fmtNum
 });
 const { addReading, meterNum, inboxCounts } = equipment;
+// ---------- material categories, units, extra fields (wire length, gauge, ...) ----------
+const cats = require('./categories')({ app, db, auth, adminOnly, str, bad, HttpError, now, getItem, itemOut, recordEvent, fmtNum });
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 

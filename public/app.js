@@ -147,14 +147,38 @@
   async function loadState() {
     const s = await api('GET', 'state');
     S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.unread = s.unread || 0; S.inbox = s.inbox || null;
+    if (s.categories) { S.cats = s.categories; S.fieldDefs = s.fieldDefs; S.units = s.units; S.icons = s.icons; }
   }
+  async function loadCats() {
+    const r = await api('GET', 'categories');
+    S.cats = r.categories; S.fieldDefs = r.fieldDefs; S.units = r.units; S.icons = r.icons;
+  }
+
+  // ---------- material categories ----------
+  const catById = id => (S.cats || []).find(c => c.id === id) || null;
+  const otherCat = () => catById('other') || { id: 'other', name: 'Other / Uncategorized', icon: '📦', fields: [] };
+  function lengthLabel(cat) {
+    const f = (cat && cat.fields) || [];
+    return f.includes('wireGauge') || f.includes('wireType') ? 'Length of wire' : f.includes('cableType') ? 'Cable length' : f.includes('pipeSize') || f.includes('pipeMaterial') ? 'Pipe length' : 'Length';
+  }
+  function qtyText(item) { return fmtQty(item.quantity) + (item.unit && item.unit !== 'each' ? ' ' + item.unit : ''); }
+  function lenText(e) { return e && e.length != null ? `${Number(e.length).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${e.lengthUnit || 'ft'}` : ''; }
+  // "12 AWG · THHN / THWN-2" (the extra choice fields, in the standard order)
+  function specText(item) {
+    const e = item.extra || {}, defs = S.fieldDefs || {};
+    return Object.keys(defs).filter(k => defs[k].kind === 'choice' && e[k]).map(k => e[k]).join(' · ');
+  }
+  const catPath = id => '#/materials/c/' + encodeURIComponent(id || 'other');
 
   // Search: every word typed must appear somewhere in name, quantity, location or description.
   function matches(item, query) {
     const words = String(query || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
     if (!words.length) return true;
     const hay = [item.name, fmtQty(item.quantity), item.location, item.description,
-      item.meterValue != null ? fmtQty(item.meterValue) : '', item.repairStatus ? 'repair needs repair ' + item.repairStatus.level.replace('_', ' ') : ''].join(' \u0001 ').toLowerCase();
+      item.meterValue != null ? fmtQty(item.meterValue) : '', item.repairStatus ? 'repair needs repair ' + item.repairStatus.level.replace('_', ' ') : '',
+      item.categoryName || '', item.unit && item.unit !== 'each' ? qtyText(item) : '',
+      item.extra && item.extra.length != null ? lenText(item.extra) + ' ' + fmtQty(item.extra.length) + (item.extra.lengthUnit || 'ft') : '',
+      ...Object.values((item.extra && typeof item.extra === 'object') ? item.extra : {}).filter(v => typeof v === 'string')].join(' \u0001 ').toLowerCase();
     return words.every(w => hay.includes(w));
   }
   const sortItems = items => items.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base', numeric: true }));
@@ -185,17 +209,22 @@
   // ---------- shared pieces ----------
   function cardHTML(item, showType) {
     const t = TYPES[item.type] || TYPES.material;
+    const mat = t.key === 'material', spec = mat ? specText(item) : '', len = mat ? lenText(item.extra) : '';
     const thumb = item.thumbUrl
       ? `<img class="thumb" src="${esc(item.thumbUrl)}" alt="" loading="lazy">`
+      : mat ? `<div class="thumb thumb-empty material cat-thumb" aria-hidden="true">${esc(item.categoryIcon || '📦')}</div>`
       : `<div class="thumb thumb-empty ${t.key}" aria-hidden="true">${ICONS[t.key]}</div>`;
     return `<li><a class="card" href="#/${t.path}/${encodeURIComponent(item.id)}">
       ${thumb}
       <div class="card-body">
         ${showType ? `<span class="tag ${t.key}">${t.one}</span>` : ''}
+        ${showType && mat ? `<span class="card-cat">${esc(item.categoryIcon || '📦')} ${esc(item.categoryName || '')}</span>` : ''}
         <span class="card-name">${esc(item.name) || '(no name)'}</span>
+        ${len ? `<span class="card-len">Length: <b>${esc(len)}</b></span>` : ''}
+        ${spec ? `<span class="card-spec">${esc(spec)}</span>` : ''}
         ${t.key === 'equipment' ? `${statusBadge(item.repairStatus)}
           <span class="card-qty">${ICONS.gauge}<b>${item.meterValue != null ? fmtMeter(item.meterValue, item.meterUnit) : 'No ' + item.meterUnit + ' yet'}</b></span>`
-          : `<span class="card-qty">Qty: <b>${fmtQty(item.quantity)}</b></span>`}
+          : `<span class="card-qty">Qty: <b>${esc(mat ? qtyText(item) : fmtQty(item.quantity))}</b></span>`}
         ${item.location ? `<span class="card-loc">${ICONS.pin}${esc(item.location)}</span>` : ''}
       </div></a></li>`;
   }
@@ -417,13 +446,72 @@
   }
 
   // ---------- list ----------
-  async function renderList(t) {
-    setHeader(t.title || t.many, '#/');
-    const st = searchState[t.key];
+  // Materials: big category buttons with counts, and one search box for all materials.
+  async function renderMaterialsHome() {
+    const t = TYPES.material;
+    setHeader('Materials', '#/');
+    const st = searchState.material;
     app.innerHTML = `
-      <a class="btn btn-primary btn-wide ${t.key}" href="#/${t.path}/new">${ICONS.plus}<span>Add ${t.one}</span></a>
+      <section class="home-search">
+        ${searchBoxHTML('matSearch', 'Search all materials', st.q)}
+        <p class="result-count" id="matCount" hidden></p>
+        <ul class="cards" id="matResults"></ul>
+      </section>
+      <div id="catArea">
+        <a class="btn btn-primary btn-wide material" href="#/materials/new">${ICONS.plus}<span>Add Material</span></a>
+        <p class="pick-cat">Pick a category:</p>
+        <ul class="cat-grid" id="catGrid"><li class="muted">Loading...</li></ul>
+        ${isAdmin() ? `<a class="btn btn-light btn-wide mt" href="#/categories">${ICONS.wrench}<span>Manage categories</span></a>` : ''}
+      </div>`;
+    let items = [];
+    const results = app.querySelector('#matResults'), count = app.querySelector('#matCount'), area = app.querySelector('#catArea');
+    function update() {
+      const q = st.q.trim();
+      area.hidden = !!q;
+      if (!q) { results.innerHTML = ''; count.hidden = true; return; }
+      const found = sortItems(items.filter(i => matches(i, q)));
+      count.hidden = false;
+      count.textContent = found.length ? `Found ${found.length} in all materials` : 'Nothing found. Try a different word.';
+      results.innerHTML = found.map(i => cardHTML(i, true)).join('');
+    }
+    function paintGrid() {
+      const counts = {};
+      items.forEach(i => { counts[i.categoryId] = (counts[i.categoryId] || 0) + 1; });
+      // Hidden categories disappear, unless something is still in them (so nothing gets lost).
+      const cats = (S.cats || []).filter(c => !c.hidden || counts[c.id]);
+      app.querySelector('#catGrid').innerHTML = cats.map(c => `<li><a class="cat-btn ${counts[c.id] ? '' : 'zero'}" href="${catPath(c.id)}">
+          <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
+          <span class="cat-name">${esc(c.name)}</span>
+          <span class="cat-count">${counts[c.id] ? `${counts[c.id]} ${counts[c.id] === 1 ? 'item' : 'items'}` : 'Empty'}${c.hidden ? ' · hidden' : ''}</span>
+        </a></li>`).join('');
+    }
+    async function load() {
+      const [r] = await Promise.all([api('GET', 'items?type=material'), loadCats().catch(() => {})]);
+      items = r.items; items.forEach(i => itemCache.set(i.id, i));
+      paintGrid(); update();
+    }
+    wireSearch(app, 'matSearch', q => { st.q = q; update(); });
+    pageRefresh = load;
+    await load();
+  }
+
+  async function renderList(t, catId) {
+    let cat = null;
+    if (t.key === 'material') {
+      if (!catId) return renderMaterialsHome();
+      if (!S.cats) await loadCats();
+      cat = catById(catId);
+      if (!cat) { await loadCats(); cat = catById(catId); }
+      if (!cat) return go('#/materials');
+    }
+    setHeader(cat ? cat.name : (t.title || t.many), cat ? '#/materials' : '#/');
+    const st = cat ? (searchState['cat:' + cat.id] = searchState['cat:' + cat.id] || { q: '', loc: '' }) : searchState[t.key];
+    const addHref = cat ? `#/materials/new?cat=${encodeURIComponent(cat.id)}` : `#/${t.path}/new`;
+    app.innerHTML = `
+      ${cat ? `<h2 class="cat-title"><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(cat.name)}</h2>` : ''}
+      <a class="btn btn-primary btn-wide ${t.key}" href="${addHref}">${ICONS.plus}<span>Add ${cat ? 'to ' + esc(cat.name) : t.one}</span></a>
       <div class="filters">
-        ${searchBoxHTML('listSearch', 'Search ' + t.many.toLowerCase(), st.q)}
+        ${searchBoxHTML('listSearch', cat ? 'Search ' + cat.name : 'Search ' + t.many.toLowerCase(), st.q)}
         <label class="loc-filter" id="locWrap" hidden>${ICONS.pin}<span class="sr-only">Location</span><select id="locFilter"></select></label>
         ${t.key === 'equipment' ? `<label class="chip-toggle"><input type="checkbox" id="needsFilter" ${st.needs ? 'checked' : ''}><span>${ICONS.wrench} Needs repair only <b id="needsCount"></b></span></label>` : ''}
       </div>
@@ -431,8 +519,9 @@
         <button type="button" class="btn btn-light btn-small" id="refreshBtn">${ICONS.refresh}<span>Refresh</span></button></div>
       <ul class="cards" id="list"></ul>
       <div class="empty" id="emptyMsg" hidden>
-        <div class="empty-icon ${t.key}">${ICONS[t.key]}</div>
-        <p>No ${t.many.toLowerCase()} yet.</p><p>Tap <b>Add ${t.one}</b> to add the first one.</p></div>`;
+        ${cat ? `<div class="empty-icon material cat-emoji" aria-hidden="true">${esc(cat.icon)}</div>` : `<div class="empty-icon ${t.key}">${ICONS[t.key]}</div>`}
+        ${cat ? `<p>Nothing in ${esc(cat.name)} yet.</p><p>Tap <b>Add</b> above to add the first one.</p>`
+          : `<p>No ${t.many.toLowerCase()} yet.</p><p>Tap <b>Add ${t.one}</b> to add the first one.</p>`}</div>`;
     let items = [];
     const list = app.querySelector('#list'), count = app.querySelector('#listCount'), sel = app.querySelector('#locFilter');
     function update() {
@@ -447,7 +536,8 @@
     }
     async function load() {
       const r = await api('GET', 'items?type=' + t.key);
-      items = sortItems(r.items); items.forEach(i => itemCache.set(i.id, i));
+      r.items.forEach(i => itemCache.set(i.id, i));
+      items = sortItems(cat ? r.items.filter(i => i.categoryId === cat.id) : r.items);
       const locs = [...new Set(items.map(i => (i.location || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
       if (st.loc && !locs.includes(st.loc)) st.loc = '';
       app.querySelector('#locWrap').hidden = locs.length < 2;
@@ -477,17 +567,38 @@
     try { item = await fetchItem(id); }
     catch (ex) { if (ex.status === 404) { itemCache.delete(id); app.innerHTML = notFound(t); return; } throw ex; }
     if (item.type !== t.key) { app.innerHTML = notFound(t); return; }
+    const mat = t.key === 'material';
+    if (mat && !S.cats) await loadCats().catch(() => {});
+    const cat = mat ? (catById(item.categoryId) || otherCat()) : null;
+    const listHref = mat ? catPath(item.categoryId) : '#/' + t.path;
+    if (mat) setHeader(t.one, listHref);
+    const defs = S.fieldDefs || {};
+    const specs = mat ? Object.keys(defs).filter(k => defs[k].kind === 'choice' && item.extra && item.extra[k]) : [];
+    const hasLen = mat && cat.fields.includes('length');
     function updatedLine() {
       return item.updatedByName ? `Updated by <b>${esc(item.updatedByName)}</b>, ${esc(fmtWhen(item.updatedAt))}` : `Updated ${esc(fmtWhen(item.updatedAt))}`;
     }
     app.innerHTML = `
       <article class="detail">
         ${item.photoUrl ? `<img class="detail-photo" src="${esc(item.photoUrl)}" alt="Photo of ${esc(item.name)}">` :
-          `<div class="detail-photo photo-empty ${t.key}">${ICONS[t.key]}<span>No photo</span></div>`}
+          `<div class="detail-photo photo-empty ${t.key}">${mat ? `<span class="cat-photo" aria-hidden="true">${esc(cat.icon)}</span>` : ICONS[t.key]}<span>No photo</span></div>`}
         <div class="detail-info">
           <h2 class="detail-name">${esc(item.name)}</h2>
+          ${mat ? `<a class="cat-link" href="${listHref}"><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(item.categoryName)}</a>` : ''}
           <p class="updated" id="updatedLine">${updatedLine()}</p>
-          <div class="field-label">Quantity</div>
+          ${hasLen ? `<section class="len-box">
+            <div class="field-label">${esc(lengthLabel(cat))}</div>
+            <div class="len-big" id="lenOut">${item.extra.length != null ? esc(lenText(item.extra)) : '<span class="muted">Not entered</span>'}</div>
+            <label for="lenDelta" class="len-q">Used some or got more? Type how much:</label>
+            <div class="len-adjust">
+              <input id="lenDelta" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 50">
+              <span class="len-unit">${esc((item.extra && item.extra.lengthUnit) || 'ft')}</span>
+            </div>
+            <div class="two-btns"><button type="button" class="btn btn-light" data-len="-1">&minus; Used</button>
+              <button type="button" class="btn btn-light" data-len="1">+ Added</button></div>
+          </section>` : ''}
+          ${specs.map(k => `<div class="field-label">${esc(defs[k].label)}</div><p class="detail-text spec-val">${esc(item.extra[k])}</p>`).join('')}
+          <div class="field-label">Quantity${mat && item.unit && item.unit !== 'each' ? ` (${esc(item.unit)})` : ''}</div>
           <div class="qty-row">
             <button type="button" class="qty-btn" data-step="-1" aria-label="One less">&minus;</button>
             <output class="qty-big" id="qtyOut">${fmtQty(item.quantity)}</output>
@@ -512,16 +623,27 @@
         item = r.item;
         out.textContent = fmtQty(item.quantity);
         app.querySelector('#updatedLine').innerHTML = updatedLine();
-        toast('Quantity saved: ' + fmtQty(item.quantity));
+        toast('Quantity saved: ' + (mat ? qtyText(item) : fmtQty(item.quantity)));
+      } catch (ex) { toast(ex.message); }
+    }));
+    app.querySelectorAll('[data-len]').forEach(b => b.addEventListener('click', async () => {
+      const inp = app.querySelector('#lenDelta'), n = parseFloat(inp.value);
+      if (!isFinite(n) || n <= 0) { toast('Type how much first, e.g. 50'); inp.focus(); return; }
+      try {
+        const r = await api('POST', `items/${encodeURIComponent(item.id)}/length`, { delta: n * Number(b.dataset.len) });
+        item = r.item; inp.value = '';
+        app.querySelector('#lenOut').textContent = lenText(item.extra);
+        app.querySelector('#updatedLine').innerHTML = updatedLine();
+        toast(`${lengthLabel(cat)} saved: ${lenText(item.extra)}`);
       } catch (ex) { toast(ex.message); }
     }));
     const del = app.querySelector('#delBtn');
     if (del) del.addEventListener('click', async () => {
       if (!(await confirmBox(`Delete "${item.name}"? The boss will be told, and can bring it back if it was a mistake.`, 'Delete'))) return;
-      try { await api('DELETE', 'items/' + encodeURIComponent(item.id)); itemCache.delete(item.id); toast('Deleted'); go('#/' + t.path); }
+      try { await api('DELETE', 'items/' + encodeURIComponent(item.id)); itemCache.delete(item.id); toast('Deleted'); go(listHref); }
       catch (ex) { alert(ex.message); }
     });
-    pageRefresh = async () => { if (document.getElementById('modal').hidden) await renderDetail(t, id); };
+    pageRefresh = async () => { if (document.getElementById('modal').hidden && !app.querySelector('#lenDelta:focus')) await renderDetail(t, id); };
   }
   function notFound(t) {
     return `<div class="empty"><p>That item was not found. It may have been deleted.</p>
@@ -529,18 +651,64 @@
   }
 
   // ---------- add / edit ----------
-  async function renderForm(t, id) {
+  // Extra fields for a category (generic: length, wire size, wire type, cable type, pipe size, pipe material...).
+  function extrasHTML(cat, vals) {
+    const defs = S.fieldDefs || {};
+    vals = vals || {};
+    return (cat.fields || []).filter(k => defs[k]).map(k => {
+      const d = defs[k];
+      if (d.kind === 'length') {
+        const u = vals.lengthUnit === 'm' ? 'm' : 'ft';
+        return `<div class="field"><label for="x-length">${esc(lengthLabel(cat))} <span class="hint">optional</span></label>
+          <div class="len-row"><input id="x-length" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 500" value="${vals.length != null ? esc(vals.length) : ''}">
+          <div class="seg seg-unit">${d.units.map(x => `<label><input type="radio" name="x-lunit" value="${x}" ${x === u ? 'checked' : ''}><span>${x}</span></label>`).join('')}</div></div></div>`;
+      }
+      const v = vals[k] || '', custom = v && !d.options.includes(v);
+      return `<div class="field"><label for="x-${k}">${esc(d.label)} <span class="hint">optional</span></label>
+        <select id="x-${k}" class="form-select" data-key="${k}">
+          <option value="">— Choose —</option>
+          ${d.options.map(o => `<option value="${esc(o)}" ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}
+          <option value="__other" ${custom ? 'selected' : ''}>Other (type it)…</option>
+        </select>
+        <input id="x-${k}-other" type="text" maxlength="40" class="mt-s" placeholder="Type the ${esc(d.label.toLowerCase())}" value="${custom ? esc(v) : ''}" ${custom ? '' : 'hidden'}></div>`;
+    }).join('');
+  }
+  function readExtras(box) {
+    const out = {};
+    const len = box.querySelector('#x-length');
+    if (len && len.value.trim() !== '') { out.length = len.value.trim(); out.lengthUnit = (box.querySelector('input[name=x-lunit]:checked') || {}).value || 'ft'; }
+    box.querySelectorAll('select[data-key]').forEach(sel => {
+      const k = sel.dataset.key, v = sel.value === '__other' ? box.querySelector(`#x-${k}-other`).value.trim() : sel.value;
+      if (v) out[k] = v;
+    });
+    return out;
+  }
+  function wireExtras(box) {
+    box.querySelectorAll('select[data-key]').forEach(sel => sel.addEventListener('change', () => {
+      const o = box.querySelector(`#x-${sel.dataset.key}-other`);
+      o.hidden = sel.value !== '__other'; if (!o.hidden) o.focus();
+    }));
+  }
+
+  async function renderForm(t, id, query) {
+    query = query || {};
     let item = null;
     if (id) {
       try { item = await fetchItem(id); }
       catch (ex) { if (ex.status === 404) { setHeader(t.many, '#/' + t.path); app.innerHTML = notFound(t); return; } throw ex; }
     }
     const editing = !!item;
-    setHeader(editing ? 'Edit ' + t.one : 'Add ' + t.one, editing ? `#/${t.path}/${encodeURIComponent(id)}` : '#/' + t.path);
+    const mat = t.key === 'material';
+    if (mat) await loadCats().catch(() => {});
+    const startCat = mat ? (editing ? (catById(item.categoryId) || otherCat()) : (catById(query.cat) || otherCat())) : null;
+    setHeader(editing ? 'Edit ' + t.one : 'Add ' + t.one, editing ? `#/${t.path}/${encodeURIComponent(id)}` : (mat ? (query.cat ? catPath(startCat.id) : '#/materials') : '#/' + t.path));
+    const catChoices = mat ? (S.cats || []).filter(c => !c.hidden || c.id === startCat.id) : [];
     const data = { photoPreview: item ? item.photoUrl : '', newPhoto: null, removePhoto: false };
     const v = item || { name: '', quantity: 1, location: '', description: '', meterUnit: 'hours' };
     app.innerHTML = `
       <form class="form" id="itemForm" novalidate>
+        ${mat ? `<div class="field"><label for="f-cat">Category</label>
+          <select id="f-cat" class="form-select big">${catChoices.map(c => `<option value="${esc(c.id)}" ${c.id === startCat.id ? 'selected' : ''}>${esc(c.icon)}  ${esc(c.name)}</option>`).join('')}</select></div>` : ''}
         <div class="field">
           <label for="f-name">Name <span class="req">(required)</span></label>
           <input id="f-name" type="text" maxlength="120" autocomplete="off" autocapitalize="sentences"
@@ -555,6 +723,9 @@
             <button type="button" class="qty-btn" data-step="1" aria-label="One more">+</button>
           </div>
         </div>
+        ${mat ? `<div class="field"><label for="f-unit">Counted in</label>
+          <select id="f-unit" class="form-select">${(S.units || ['each']).map(u => `<option value="${esc(u)}" ${u === ((item && item.unit) || 'each') ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select></div>
+          <div id="extraFields">${extrasHTML(startCat, item && item.extra)}</div>` : ''}
         ${t.key === 'equipment' ? `<div class="field"><span class="label">Counts</span>
           <div class="seg"><label><input type="radio" name="unit" value="hours" ${(v.meterUnit || 'hours') === 'hours' ? 'checked' : ''}><span>Hours</span></label>
           <label><input type="radio" name="unit" value="miles" ${v.meterUnit === 'miles' ? 'checked' : ''}><span>Miles</span></label></div></div>
@@ -592,6 +763,15 @@
     }).catch(() => {});
 
     const form = app.querySelector('#itemForm'), qty = form.querySelector('#f-qty');
+    const extraBox = form.querySelector('#extraFields');
+    if (extraBox) {
+      wireExtras(extraBox);
+      form.querySelector('#f-cat').addEventListener('change', e => {
+        const keep = readExtras(extraBox); // keep typed values when switching between categories with the same fields
+        extraBox.innerHTML = extrasHTML(catById(e.target.value) || otherCat(), keep);
+        wireExtras(extraBox);
+      });
+    }
     form.querySelectorAll('.qty-btn').forEach(b => b.addEventListener('click', () => {
       qty.value = fmtQty(Math.max(0, (parseFloat(qty.value) || 0) + Number(b.dataset.step)));
     }));
@@ -627,6 +807,12 @@
         type: t.key, name, quantity: isFinite(q) && q > 0 ? Math.round(q * 100) / 100 : 0,
         location: form.querySelector('#f-loc').value.trim(), description: form.querySelector('#f-desc').value.trim()
       };
+      if (mat) {
+        body.categoryId = form.querySelector('#f-cat').value;
+        body.unit = form.querySelector('#f-unit').value;
+        body.extra = readExtras(extraBox);
+        if (body.extra.length !== undefined && !(parseFloat(body.extra.length) >= 0)) { showError(form.querySelector('#saveErr'), 'Length must be a number.'); return; }
+      }
       if (t.key === 'equipment') {
         body.meterUnit = form.querySelector('input[name=unit]:checked').value;
         const fm = form.querySelector('#f-meter'); if (fm && fm.value !== '') body.meterValue = fm.value;
@@ -638,11 +824,93 @@
         try {
           const r = editing ? await api('PUT', 'items/' + encodeURIComponent(item.id), body) : await api('POST', 'items', body);
           toast('Saved');
-          go(editing ? `#/${t.path}/${encodeURIComponent(r.item.id)}` : '#/' + t.path);
+          go(editing ? `#/${t.path}/${encodeURIComponent(r.item.id)}` : (mat ? catPath(r.item.categoryId) : '#/' + t.path));
         } catch (ex) { showError(saveErr, ex.message + (ex.status === 0 ? ' Your typing is kept on this screen.' : '')); }
       });
     });
     if (!editing) setTimeout(() => { if (window.matchMedia('(pointer: fine)').matches) form.querySelector('#f-name').focus(); }, 50);
+  }
+
+  // ---------- manage categories (admin) ----------
+  async function renderCategories() {
+    setHeader('Categories', '#/materials');
+    const [r] = await Promise.all([api('GET', 'items?type=material'), loadCats()]);
+    const counts = {};
+    r.items.forEach(i => { counts[i.categoryId] = (counts[i.categoryId] || 0) + 1; });
+    const defs = S.fieldDefs || {};
+    app.innerHTML = `
+      <a class="btn btn-primary btn-wide material" href="#/categories/new">${ICONS.plus}<span>Add a category</span></a>
+      <p class="hint mt">Tap a category to rename it, change its icon or extra fields, or hide it. Use the arrows to change the order on the Materials page.</p>
+      <ul class="mc-list" id="mcList">
+        ${S.cats.map((c, i) => `<li class="mc-row ${c.hidden ? 'is-hidden' : ''}" data-id="${esc(c.id)}">
+          <a class="mc-main" href="#/categories/${encodeURIComponent(c.id)}">
+            <span class="mc-icon" aria-hidden="true">${esc(c.icon)}</span>
+            <span class="mc-text"><b>${esc(c.name)}</b>
+              <small>${counts[c.id] || 0} ${counts[c.id] === 1 ? 'item' : 'items'}${c.hidden ? ' · <span class="hid-tag">Hidden</span>' : ''}${c.fields.length ? ' · Extra: ' + esc(c.fields.map(k => defs[k] ? defs[k].label : k).join(', ')) : ''}</small></span>
+          </a>
+          <div class="mc-move">
+            <button type="button" class="mv" data-mv="-1" aria-label="Move ${esc(c.name)} up" ${i === 0 ? 'disabled' : ''}>▲</button>
+            <button type="button" class="mv" data-mv="1" aria-label="Move ${esc(c.name)} down" ${i === S.cats.length - 1 ? 'disabled' : ''}>▼</button>
+          </div></li>`).join('')}
+      </ul>`;
+    app.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', async () => {
+      const ids = S.cats.map(c => c.id), id = b.closest('[data-id]').dataset.id, i = ids.indexOf(id), j = i + Number(b.dataset.mv);
+      if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+      try {
+        const res = await api('POST', 'categories/order', { ids });
+        S.cats = res.categories;
+        await renderCategories();
+        const again = app.querySelector(`[data-id="${CSS.escape(id)}"] [data-mv="${b.dataset.mv}"]`);
+        (again && !again.disabled ? again : app.querySelector(`[data-id="${CSS.escape(id)}"] .mc-main`)).focus();
+      } catch (ex) { toast(ex.message); }
+    }));
+  }
+
+  async function renderCategoryForm(id) {
+    await loadCats();
+    const c = id ? catById(id) : null;
+    if (id && !c) return go('#/categories');
+    setHeader(c ? 'Edit category' : 'Add category', '#/categories');
+    const defs = S.fieldDefs || {}, icons = S.icons || ['📦'];
+    const icon = c ? c.icon : '📦';
+    const iconList = icons.includes(icon) ? icons : [icon, ...icons];
+    app.innerHTML = `
+      <form class="form" id="catForm" novalidate>
+        <div class="field"><label for="c-name">Name <span class="req">(required)</span></label>
+          <input id="c-name" type="text" maxlength="60" autocapitalize="words" placeholder="e.g. Tile & Stone" value="${c ? esc(c.name) : ''}"></div>
+        <div class="field"><span class="label">Icon</span>
+          <div class="icon-pick" role="radiogroup" aria-label="Icon">
+            ${iconList.map(e => `<label><input type="radio" name="icon" value="${esc(e)}" ${e === icon ? 'checked' : ''}><span aria-hidden="true">${esc(e)}</span></label>`).join('')}
+          </div></div>
+        <div class="field"><span class="label">Extra fields <span class="hint">shown when adding items in this category</span></span>
+          ${Object.keys(defs).map(k => `<label class="switch-row"><input type="checkbox" name="fld" value="${k}" ${c && c.fields.includes(k) ? 'checked' : ''}><span class="switch" aria-hidden="true"></span><span>${esc(defs[k].label)}${defs[k].kind === 'length' ? ' (ft / m)' : ''}</span></label>`).join('')}
+        </div>
+        ${c && c.id !== 'other' ? `<div class="field"><label class="switch-row"><input type="checkbox" id="c-hidden" ${c.hidden ? 'checked' : ''}><span class="switch" aria-hidden="true"></span><span>Hide this category</span></label>
+          <p class="hint">Hidden categories don't show on the Materials page or when adding items. If items are still in it, it keeps showing (marked hidden) until they are moved.</p></div>` : ''}
+        ${errorBox('catErr')}
+        <div class="action-row sticky-actions">
+          <a class="btn btn-light" href="#/categories">Cancel</a>
+          <button type="submit" class="btn btn-primary material" id="catBtn">Save</button>
+        </div>
+      </form>`;
+    const f = app.querySelector('#catForm');
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      const body = {
+        name: f.querySelector('#c-name').value.trim(),
+        icon: (f.querySelector('input[name=icon]:checked') || {}).value || '📦',
+        fields: [...f.querySelectorAll('input[name=fld]:checked')].map(i => i.value)
+      };
+      const hid = f.querySelector('#c-hidden'); if (hid) body.hidden = hid.checked;
+      if (!body.name) return showError(f.querySelector('#catErr'), 'Please type a name.');
+      withBusy(f.querySelector('#catBtn'), async () => {
+        try {
+          const r = c ? await api('PUT', 'categories/' + encodeURIComponent(c.id), body) : await api('POST', 'categories', body);
+          S.cats = r.categories; toast('Saved'); go('#/categories');
+        } catch (ex) { showError(f.querySelector('#catErr'), ex.message); }
+      });
+    });
   }
 
   // ---------- people (admin) ----------
@@ -1346,9 +1614,12 @@
     const who = `<b>${esc(n.mine ? 'You' : n.actorName)}</b>`, name = `<b>${esc(sn.name)}</b>`;
     if (!NEW_KINDS.includes(n.kind)) {
       text = `${who} ${verbs[n.kind]} ${name}`;
-      if (n.kind === 'qty') line2 = `Qty ${fmtQty(d.from)} → <b>${fmtQty(d.to)}</b>`;
+      const u = sn.unit && sn.unit !== 'each' ? ' ' + esc(sn.unit) : '';
+      if (n.kind === 'qty' && d.field === 'length') { text = `${who} changed the length of ${name}`; line2 = `Length ${fmtQty(d.from)} → <b>${fmtQty(d.to)} ${esc(d.unit || 'ft')}</b>`; }
+      else if (n.kind === 'qty') line2 = `Qty ${fmtQty(d.from)} → <b>${fmtQty(d.to)}${u}</b>`;
       else if (n.kind === 'edit') line2 = esc((d.changes || []).join(', '));
-      else line2 = `Qty ${fmtQty(sn.quantity)}${sn.location ? ' — ' + esc(sn.location) : ''}`;
+      else line2 = `Qty ${fmtQty(sn.quantity)}${u}${sn.length != null ? ` — Length ${fmtQty(sn.length)} ${esc(sn.lengthUnit || 'ft')}` : ''}${sn.location ? ' — ' + esc(sn.location) : ''}`;
+      if (sn.categoryName) line2 = `<span class="notif-cat">${esc(sn.categoryName)}</span> ${line2}`;
     } else if (n.kind === 'approval') {
       text = `${who} asks to ${d.kind === 'delete' ? 'delete' : 'change'} a record on ${name}`;
       line2 = `${d.kind === 'delete' ? '' : esc((d.changes || []).join(', ')) + ' — '}“${esc(d.reason || '')}”`;
@@ -1373,7 +1644,7 @@
       text = `${who} marked your repair request on ${name}: <b>${RSTAT[d.status] || ''}</b>`;
       line2 = esc(d.problem || '') + (d.note ? ` — “${esc(d.note)}”` : '');
     }
-    const label = n.kind === 'request_result' ? (d.approved ? 'Approved' : 'Not approved') : KIND_LABEL[n.kind] || n.kind;
+    const label = n.kind === 'request_result' ? (d.approved ? 'Approved' : 'Not approved') : n.kind === 'qty' && d.field === 'length' ? 'Length' : KIND_LABEL[n.kind] || n.kind;
     const del = n.kind === 'delete';
     return `<li class="notif ${n.read ? '' : 'unread'} kind-${n.kind}" data-id="${n.id}">
       <button type="button" class="notif-main" data-open="${n.id}">
@@ -1481,7 +1752,7 @@
     app.innerHTML = `
       <section class="panel">
         <h2>Download a backup</h2>
-        <p>One file with all materials, tools, equipment (hours/miles, maintenance records, repair requests), photos and people. Keep it somewhere safe and private (it contains sign-in info).</p>
+        <p>One file with all materials (and categories), tools, equipment (hours/miles, maintenance records, repair requests), photos and people. Keep it somewhere safe and private (it contains sign-in info).</p>
         <a class="btn btn-primary btn-wide" href="api/backup" download id="dlBackup">Download backup file</a>
       </section>
       <section class="panel">
@@ -1501,7 +1772,7 @@
         const text = await f.text();
         try { JSON.parse(text); } catch (e) { throw new Error('This is not a backup file.'); }
         const r = await api('POST', 'restore', text);
-        st.textContent = `Done: ${r.items} ${r.items === 1 ? 'item' : 'items'} restored` + (r.records ? `, ${r.records} maintenance/repair records` : '') + (r.repairs ? `, ${r.repairs} repair requests` : '') + (r.people ? `, ${r.people} people added` : '') + (r.skipped ? ` (${r.skipped} skipped because they were not valid)` : '') + '.';
+        st.textContent = `Done: ${r.items} ${r.items === 1 ? 'item' : 'items'} restored` + (r.categories ? `, ${r.categories} categories` : '') + (r.records ? `, ${r.records} maintenance/repair records` : '') + (r.repairs ? `, ${r.repairs} repair requests` : '') + (r.people ? `, ${r.people} people added` : '') + (r.skipped ? ` (${r.skipped} skipped because they were not valid)` : '') + '.';
         toast('Restore finished');
       } catch (ex) { st.textContent = 'Could not restore: ' + ex.message; }
       finally { imp.value = ''; }
@@ -1514,7 +1785,9 @@
     const seq = ++renderSeq;
     pageRefresh = null;
     document.getElementById('modal').hidden = true;
-    const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').filter(Boolean).map(decodeURIComponent);
+    const [hashPath, hashQuery] = location.hash.split('?');
+    const query = Object.fromEntries(new URLSearchParams(hashQuery || ''));
+    const parts = (hashPath.replace(/^#\/?/, '') || '').split('/').filter(Boolean).map(decodeURIComponent);
     try {
       if (!booted) {
         try { await loadState(); booted = true; }
@@ -1527,13 +1800,15 @@
       if (S.setupNeeded) return renderSetup();
       if (!S.user) return renderLogin();
       if (S.user.mustChangePassword) return renderPasswordForm(true);
-      const adminPages = ['people', 'backup', 'notifications'];
+      const adminPages = ['people', 'backup', 'notifications', 'categories'];
       if (adminPages.includes(parts[0]) && !isAdmin()) return go('#/');
       if (!parts.length) await renderHome();
       else if (parts[0] === 'account') parts[1] === 'password' ? renderPasswordForm(false) : renderAccount();
       else if (parts[0] === 'backup') renderBackup();
       else if (parts[0] === 'notifications') await renderNotifications();
       else if (parts[0] === 'requests') await renderMyRequests();
+      else if (parts[0] === 'categories') parts[1] ? await renderCategoryForm(parts[1] === 'new' ? null : parts[1]) : await renderCategories();
+      else if (parts[0] === 'materials' && parts[1] === 'c') await renderList(TYPES.material, parts[2]);
       else if (parts[0] === 'equipment' && parts[1] && parts[1] !== 'new' && parts[2] && parts[2] !== 'edit') {
         const [p0, q] = location.hash.split('?');
         const query = Object.fromEntries(new URLSearchParams(q || ''));
@@ -1552,7 +1827,7 @@
       } else if (byPath[parts[0]]) {
         const t = byPath[parts[0]];
         if (parts.length === 1) await renderList(t);
-        else if (parts[1] === 'new') await renderForm(t, null);
+        else if (parts[1] === 'new') await renderForm(t, null, query);
         else if (parts[2] === 'edit') await renderForm(t, parts[1]);
         else await renderDetail(t, parts[1]);
       } else return go('#/');

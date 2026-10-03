@@ -212,6 +212,26 @@ function openDb(dataDir) {
     const bad = db.pragma('foreign_key_check');
     if (bad.length) throw new Error('Database upgrade problem: ' + JSON.stringify(bad));
   }
+  if (db.pragma('user_version', { simple: true }) < 4) {
+    // v2.3: material categories, quantity unit, and per-category extra fields (wire length, gauge, ...).
+    const { seedCategories, OTHER_ID } = require('./catalog');
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE categories (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📦',
+          sort INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0,
+          fields TEXT NOT NULL DEFAULT '[]', created_at INTEGER
+        );
+        ALTER TABLE items ADD COLUMN category_id TEXT;
+        ALTER TABLE items ADD COLUMN unit TEXT NOT NULL DEFAULT 'each';
+        ALTER TABLE items ADD COLUMN extra TEXT;
+        CREATE INDEX items_category ON items(category_id);
+      `);
+      seedCategories(db, Date.now());
+      db.prepare("UPDATE items SET category_id = ? WHERE type = 'material' AND category_id IS NULL").run(OTHER_ID);
+      db.pragma('user_version = 4');
+    })();
+  }
   return db;
 }
 module.exports = { openDb };

@@ -1,4 +1,4 @@
-# Job Site Inventory (v2.2): materials, tools, and equipment & maintenance
+# Job Site Inventory (v2.3): materials by category, tools, and equipment & maintenance
 
 A simple app for keeping track of **Materials**, **Tools** and **Equipment & Maintenance**: the name, how many there are, where they are, a photo, and notes.
 Everyone on the crew sees the same list. People sign in with a username and password.
@@ -6,7 +6,7 @@ It works in the browser on iPhone, Android, Windows and Mac, and can be installe
 
 - **Frontend**: plain HTML/CSS/JS in `public/`. It's an installable PWA with a service worker, so the app opens even with no signal.
 - **Backend**: Node.js 22, Express and SQLite (`better-sqlite3`), in `server/`. Photos are saved as files and only signed-in people can see them.
-- **v1** (the offline-only version that stored everything on each device) is kept under git tag `v1`, v2 before notifications is under tag `v2`, and v2.1 (before Equipment) under tag `v2.1`.
+- **v1** (the offline-only version that stored everything on each device) is kept under git tag `v1`, v2 before notifications is under tag `v2`, v2.1 (before Equipment) under tag `v2.1`, and v2.2 (before material categories) under tag `v2.2`.
 
 ## Who can do what
 | | Crew | Admin |
@@ -18,6 +18,7 @@ It works in the browser on iPhone, Android, Windows and Mac, and can be installe
 | Approve/deny record changes, edit or delete records directly, set repair request status | | ✓ |
 | Restore a deleted item | | ✓ |
 | Add people (as Crew or Admin), make someone Admin or Crew, reset passwords, turn sign-in off or on, remove people | | ✓ |
+| Add, rename, re-icon, reorder, hide material categories and choose their extra fields | | ✓ |
 | Download backup / restore (including old v1 backup files) | | ✓ |
 | Change own password | ✓ | ✓ |
 
@@ -29,6 +30,39 @@ It works in the browser on iPhone, Android, Windows and Mac, and can be installe
 - Every item shows who last changed it and when, e.g. "Updated by Mike, Oct 3, 2:15 PM".
 - Delete always asks first. Deleted items are hidden, not destroyed. Admins can **restore** them from Notifications for
   90 days (`DELETED_KEEP_DAYS`), after which the item and its photo are removed for good.
+
+## Material categories (v2.3)
+Tapping **Materials** on the home page shows a **Search all materials** box and a grid of big category buttons (icon, name, item count).
+Each category opens its own page with **its own search box** (it only searches that category), a location filter, and an
+**Add** button that picks that category for you. The item form has a **Category** dropdown (change it any time in Edit) and a
+**Counted in** unit: each, pieces, bags, boxes, bundles, rolls, sheets, pallets, buckets, tubes, ft, sq ft, tons, cubic yards, gallons, lbs
+(default "each"; cards show e.g. "Qty: 18 tons").
+
+Starting categories (residential, commercial and heavy civil):
+Site Work & Earthwork · Aggregates (Stone, Gravel, Sand) · Concrete & Cement · Masonry (Block, Brick, Stone) · Rebar & Reinforcing ·
+Structural Steel & Metals · Asphalt & Paving · Roads & Bridges · Traffic Control & Signage · Drainage, Storm & Sewer ·
+Water & Underground Utilities · Erosion Control & Geotextiles · Framing, Lumber & Sheathing · Roofing · Siding & Exterior Finishes ·
+Insulation & Weatherproofing · Doors & Windows · Drywall & Interior Finishes · Flooring & Tile · Paint, Caulk & Adhesives · Plumbing ·
+HVAC & Ductwork · Electrical · Low Voltage, Data & Communications · Fire Protection & Life Safety · Fasteners, Anchors & Hardware ·
+Safety & PPE · Landscaping · Other / Uncategorized.
+
+- **Extra fields per category.** Some categories ask for more details (all optional):
+  - **Electrical**: Length of wire (number + ft/m), Wire size/gauge (14 AWG … 4/0 … 500 kcmil) and Wire type (THHN/THWN-2, Romex/NM-B, MC, UF-B, XHHW-2, SER …).
+  - **Low Voltage, Data & Communications**: Cable length and Cable type (Cat6, Cat6A, coax, fiber, alarm …).
+  - **Plumbing**, **Drainage, Storm & Sewer**, **Water & Underground Utilities**: Pipe length, Pipe size and Pipe material (PVC, PEX, copper, HDPE, ductile iron, RCP …).
+  - Dropdowns have an **Other (type it)** choice for anything not listed.
+  - Cards show the length prominently ("Length: 500 ft") plus size/type ("12 AWG · Romex / NM-B"). Search finds these too ("12 awg", "500 ft", "romex").
+  - The details page has a **Used / Added** box: type how much (e.g. 50) and tap **− Used** or **+ Added**. Admins see "Length 250 → 200 ft" in Notifications.
+  - The system is generic: an admin can turn any of these fields on for any category (Manage categories → Extra fields).
+- **Manage categories** (admins: Materials → Manage categories): add a category (name, icon, extra fields), rename, change the icon,
+  move up/down with the arrows, or hide it. Hidden categories don't show on the Materials page or in the Add form; if items are still in
+  a hidden category it keeps showing (marked "hidden") so nothing gets lost. "Other / Uncategorized" can't be hidden. Categories are not deleted.
+- **Search**: the home search and "Search all materials" also match category names (e.g. "electrical", "asphalt").
+- **Notifications** name the category, e.g. "12/2 Romex (Electrical) — Qty 3 rolls — 250 ft — Truck 2"; edits list category/unit/length changes.
+- **Backup/restore** (backup version 4) includes the category list (names, icons, order, hidden, extra fields) and each item's category, unit and extra fields.
+  Older backups restore into "Other / Uncategorized".
+- **Upgrading** from v2.2: the database moves to schema version 4 automatically. Existing materials go to **Other / Uncategorized** with unit "each";
+  move them with Edit → Category.
 
 ## Equipment & Maintenance (v2.2)
 A third big green button on the home page. Machines have the same fields as materials and tools (name, quantity, location,
@@ -176,6 +210,7 @@ and keeps what was typed on the screen. Changes are not queued for later.
 ## Files
     public/   index.html, app.js, styles.css, sw.js, manifest.json, icons/
     server/   server.js (API, notifications, push, static files), equipment.js (meter, records, approvals, repair requests),
+              categories.js + catalog.js (material categories, units, extra fields),
               db.js (schema + migrations), reset-password.js
     Dockerfile, docker-entrypoint.sh, render.yaml, .env.example
     screenshots/   example screens (sample data)
