@@ -9,6 +9,8 @@ services:
     envVars:
       - key: DATA_DIR
         value: /data
+      - key: VAPID_SUBJECT
+        sync: false   # e.g. mailto:you@yourcompany.com (needed for phone notifications)
       - key: SETUP_CODE
         sync: false   # Render asks you to type this in; needed once to create the admin account
     disk:

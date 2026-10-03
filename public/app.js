@@ -18,6 +18,8 @@
     box: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.6 3.3L12 10.8 5.4 7.5 12 4.2zM5 9.1l6 3v7.6l-6-3V9.1zm8 10.6v-7.6l6-3v7.6l-6 3z"/></svg>',
     person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path fill="currentColor" d="M3.5 21a8.5 8.5 0 0 1 17 0z"/></svg>',
     people: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.6" fill="currentColor"/><circle cx="17" cy="9" r="2.8" fill="currentColor"/><path fill="currentColor" d="M1.5 20a7.5 7.5 0 0 1 15 0zM15.5 20a6 6 0 0 0-1.6-4.3A5.6 5.6 0 0 1 22.5 20z"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2z"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zM6 9h12l-1 12H7L6 9z"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
   };
 
@@ -25,10 +27,12 @@
   const titleEl = document.getElementById('pageTitle');
   const backBtn = document.getElementById('backBtn');
   const acctBtn = document.getElementById('acctBtn');
+  const bellBtn = document.getElementById('bellBtn');
+  const bellBadge = document.getElementById('bellBadge');
   const banner = document.getElementById('offlineBanner');
   let backTarget = '#/';
   const searchState = { home: '', material: { q: '', loc: '' }, tool: { q: '', loc: '' } };
-  const S = { user: null, settings: { crewCanDelete: false }, setupNeeded: false, setupCodeRequired: false, lastPassword: '' };
+  const S = { user: null, settings: {}, setupNeeded: false, setupCodeRequired: false, lastPassword: '', unread: 0 };
   let pageRefresh = null;
   const itemCache = new Map(); // last-seen items, used to show details when offline // set by pages that can quietly reload their data
 
@@ -46,7 +50,7 @@
   }
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
   function isAdmin() { return S.user && S.user.role === 'admin'; }
-  function canDelete() { return isAdmin() || S.settings.crewCanDelete; }
+  function canDelete() { return !!S.user; } // everyone can delete (admins can restore from Notifications)
   function firstName(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
 
   function setHeader(title, back, showAcct) {
@@ -57,7 +61,21 @@
       acctBtn.hidden = false;
       acctBtn.querySelector('span').textContent = firstName(S.user.name);
     } else acctBtn.hidden = true;
+    bellBtn.hidden = acctBtn.hidden || !isAdmin();
+    setBadge(S.unread);
   }
+  function setBadge(n) {
+    S.unread = n || 0;
+    bellBadge.hidden = !S.unread;
+    bellBadge.textContent = S.unread > 99 ? '99+' : String(S.unread);
+    bellBtn.setAttribute('aria-label', S.unread ? `Notifications, ${S.unread} new` : 'Notifications');
+    if (isAdmin() && navigator.setAppBadge) { (S.unread ? navigator.setAppBadge(S.unread) : navigator.clearAppBadge()).catch(() => {}); }
+  }
+  async function refreshUnread() {
+    if (!isAdmin() || (S.user && S.user.mustChangePassword)) return;
+    try { setBadge((await api('GET', 'notifications/unread')).unread); } catch (e) { /* ignore */ }
+  }
+  bellBtn.addEventListener('click', () => go('#/notifications'));
   backBtn.addEventListener('click', () => go(backTarget));
   acctBtn.addEventListener('click', () => go('#/account'));
 
@@ -123,7 +141,7 @@
 
   async function loadState() {
     const s = await api('GET', 'state');
-    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired;
+    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.unread = s.unread || 0;
   }
 
   // Search: every word typed must appear somewhere in name, quantity, location or description.
@@ -307,7 +325,12 @@
   }
 
   async function logout() {
+    try {
+      const sub = await currentSub();
+      if (sub) { await api('POST', 'push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+    } catch (e) { /* ignore */ }
     try { await api('POST', 'logout', {}); } catch (e) { /* still sign out locally */ }
+    setBadge(0);
     S.user = null; clearApiCache(); toast('Signed out'); go('#/');
   }
 
@@ -330,6 +353,7 @@
     setHeader('Inventory', null);
     app.innerHTML = `
       <p class="hello">Signed in as <b>${esc(S.user.name)}</b> <span class="role-tag ${S.user.role}">${isAdmin() ? 'Admin' : 'Crew'}</span></p>
+      <div id="pushPrompt"></div>
       <section class="home-search">
         ${searchBoxHTML('homeSearch', 'Search everything', searchState.home)}
         <p class="result-count" id="homeCount" hidden></p>
@@ -364,6 +388,7 @@
     }
     wireSearch(app, 'homeSearch', update);
     pageRefresh = load;
+    if (isAdmin()) showHomePushPrompt(app.querySelector('#pushPrompt'));
     await load();
   }
 
@@ -448,7 +473,6 @@
             <a class="btn btn-primary ${t.key}" href="#/${t.path}/${encodeURIComponent(item.id)}/edit">Edit</a>
             ${canDelete() ? '<button type="button" class="btn btn-danger" id="delBtn">Delete</button>' : ''}
           </div>
-          ${canDelete() ? '' : '<p class="hint center">Only an admin can delete items.</p>'}
         </div>
       </article>`;
     const dp = app.querySelector('img.detail-photo');
@@ -465,7 +489,7 @@
     }));
     const del = app.querySelector('#delBtn');
     if (del) del.addEventListener('click', async () => {
-      if (!(await confirmBox(`Delete "${item.name}"? This cannot be undone.`, 'Delete'))) return;
+      if (!(await confirmBox(`Delete "${item.name}"? The boss will be told, and can bring it back if it was a mistake.`, 'Delete'))) return;
       try { await api('DELETE', 'items/' + encodeURIComponent(item.id)); itemCache.delete(item.id); toast('Deleted'); go('#/' + t.path); }
       catch (ex) { alert(ex.message); }
     });
@@ -594,7 +618,7 @@
     setHeader('People', '#/');
     const r = await api('GET', 'users');
     app.innerHTML = `
-      <a class="btn btn-primary btn-wide" href="#/people/new">${ICONS.plus}<span>Add a crew member</span></a>
+      <a class="btn btn-primary btn-wide" href="#/people/new">${ICONS.plus}<span>Add a person</span></a>
       <ul class="cards people mt" id="people">
         ${r.users.map(u => `<li><a class="card person-card" href="#/people/${u.id}">
           <div class="thumb thumb-empty person ${u.disabled ? 'off' : ''}" aria-hidden="true">${ICONS.person}</div>
@@ -606,16 +630,7 @@
               ${u.mustChangePassword && !u.disabled ? '<span class="role-tag temp">Temp password</span>' : ''}</span>
           </div></a></li>`).join('')}
       </ul>
-      <section class="panel mt">
-        <h2>Settings</h2>
-        <label class="switch-row"><input type="checkbox" id="crewDel" ${S.settings.crewCanDelete ? 'checked' : ''}>
-          <span class="switch" aria-hidden="true"></span><span>Crew members can delete items</span></label>
-        <p class="hint">When off, only admins can delete. Crew can still add and edit.</p>
-      </section>`;
-    app.querySelector('#crewDel').addEventListener('change', async e => {
-      try { const s = await api('PUT', 'settings', { crewCanDelete: e.target.checked }); S.settings = s.settings; toast('Setting saved'); }
-      catch (ex) { e.target.checked = !e.target.checked; toast(ex.message); }
-    });
+      <p class="hint mt">Admins can manage people, see notifications and restore deleted items. Everyone can add, edit and delete items.</p>`;
   }
 
   function renderAddPerson() {
@@ -631,7 +646,7 @@
         <div class="field"><span class="label">Role</span>
           <div class="seg"><label><input type="radio" name="role" value="crew" checked><span>Crew</span></label>
           <label><input type="radio" name="role" value="admin"><span>Admin</span></label></div>
-          <p class="hint">Crew: add and edit items. Admin: also manage people, backups and deleting.</p></div>
+          <p class="hint">Crew: add, edit and delete items. Admin: also gets notifications, manages people, restores deleted items and backups.</p></div>
         ${errorBox('personErr')}
         <button type="submit" class="btn btn-primary btn-wide" id="personBtn">Add person</button>
       </form>`;
@@ -669,8 +684,9 @@
         <div class="field"><label for="e-name">Name</label><input id="e-name" type="text" maxlength="60" value="${esc(u.name)}"></div>
         <p>Username: <b>${esc(u.username)}</b></p>
         <div class="field"><span class="label">Role</span>
-          <div class="seg"><label><input type="radio" name="role" value="crew" ${u.role === 'crew' ? 'checked' : ''} ${me ? 'disabled' : ''}><span>Crew</span></label>
-          <label><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''} ${me ? 'disabled' : ''}><span>Admin</span></label></div></div>
+          <div class="seg"><label><input type="radio" name="role" value="crew" ${u.role === 'crew' ? 'checked' : ''}><span>Crew</span></label>
+          <label><input type="radio" name="role" value="admin" ${u.role === 'admin' ? 'checked' : ''}><span>Admin</span></label></div>
+          <p class="hint">Admins get notifications and can manage people.${me ? ' If you change yourself to Crew you lose these right away.' : ''}</p></div>
         ${errorBox('editErr')}
         <button class="btn btn-primary btn-wide" type="submit" id="editBtn">Save changes</button>
       </form>
@@ -682,20 +698,23 @@
         ${errorBox('resetErr')}
         <button type="button" class="btn btn-light btn-wide" id="resetBtn">Reset password</button>
       </section>
-      ${me ? '' : `<section class="panel danger-zone">
+      <section class="panel danger-zone">
         <h2>Access</h2>
-        <button type="button" class="btn btn-light btn-wide mb" id="toggleBtn">${u.disabled ? 'Turn sign-in back on' : 'Turn off sign-in (keep history)'}</button>
-        <button type="button" class="btn btn-danger btn-wide" id="removeBtn">Remove ${esc(firstName(u.name))}</button>
-        <p class="hint mt">Turning off stops them from signing in right away. Their name stays on items they changed.</p>
-      </section>`}`;
+        ${me ? '' : `<button type="button" class="btn btn-light btn-wide mb" id="toggleBtn">${u.disabled ? 'Turn sign-in back on' : 'Turn off sign-in (keep history)'}</button>`}
+        <button type="button" class="btn btn-danger btn-wide" id="removeBtn">${me ? 'Remove my account' : 'Remove ' + esc(firstName(u.name))}</button>
+        ${errorBox('accessErr')}
+        <p class="hint mt">${me ? 'You can only remove yourself if there is another admin.' : 'Turning off stops them from signing in right away. Their name stays on items they changed.'}</p>
+      </section>`;
     const f = app.querySelector('#editPerson');
     f.addEventListener('submit', e => {
       e.preventDefault();
       const roleEl = f.querySelector('input[name=role]:checked');
       withBusy(f.querySelector('#editBtn'), async () => {
         try {
-          await api('PUT', 'users/' + u.id, { name: f.querySelector('#e-name').value, role: me ? undefined : roleEl.value });
-          if (me) S.user.name = f.querySelector('#e-name').value.trim();
+          if (me && u.role === 'admin' && roleEl.value === 'crew' &&
+            !(await confirmBox('Change yourself to Crew? You will no longer be an admin.', 'Yes, change'))) return;
+          await api('PUT', 'users/' + u.id, { name: f.querySelector('#e-name').value, role: roleEl.value });
+          if (me) { await loadState(); toast('Saved'); go(isAdmin() ? '#/people' : '#/'); return; }
           toast('Saved'); go('#/people');
         } catch (ex) { showError(f.querySelector('#editErr'), ex.message); }
       });
@@ -712,13 +731,196 @@
     const tog = app.querySelector('#toggleBtn');
     if (tog) tog.addEventListener('click', async () => {
       try { await api('PUT', 'users/' + u.id, { disabled: !u.disabled }); toast(u.disabled ? 'Sign-in turned on' : 'Sign-in turned off'); renderPerson(id); }
-      catch (ex) { alert(ex.message); }
+      catch (ex) { showError(app.querySelector('#accessErr'), ex.message); }
     });
     const rem = app.querySelector('#removeBtn');
     if (rem) rem.addEventListener('click', async () => {
-      if (!(await confirmBox(`Remove ${u.name}? They won't be able to sign in. Items they changed stay.`, 'Remove'))) return;
-      try { await api('DELETE', 'users/' + u.id); toast('Removed'); go('#/people'); } catch (ex) { alert(ex.message); }
+      if (!(await confirmBox(me ? 'Remove your own account? You will be signed out.' : `Remove ${u.name}? They won't be able to sign in. Items they changed stay.`, 'Remove'))) return;
+      try {
+        await api('DELETE', 'users/' + u.id);
+        if (me) { S.user = null; clearApiCache(); toast('Your account was removed'); go('#/'); return; }
+        toast('Removed'); go('#/people');
+      } catch (ex) { showError(app.querySelector('#accessErr'), ex.message); }
     });
+  }
+
+  // ---------- push notifications on this device ----------
+  function isIOS() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  function isStandalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+  async function currentSub() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg && reg.pushManager ? reg.pushManager.getSubscription() : null;
+  }
+  // on | off | denied | ios-home | unsupported
+  async function pushState() {
+    const supported = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (!supported) return isIOS() && !isStandalone() ? 'ios-home' : 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    const sub = await currentSub().catch(() => null);
+    return sub && Notification.permission === 'granted' ? 'on' : 'off';
+  }
+  function b64ToBytes(b64) {
+    const pad = '='.repeat((4 - b64.length % 4) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+  async function enablePush() {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error(perm === 'denied'
+      ? 'Notifications are blocked for this app. Turn them on in your phone or browser settings, then try again.'
+      : 'Notifications were not turned on.');
+    const { publicKey } = await api('GET', 'push/key');
+    const reg = await navigator.serviceWorker.ready;
+    const key = b64ToBytes(publicKey);
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      const old = sub.options && sub.options.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+      if (old && (old.length !== key.length || old.some((v, i) => v !== key[i]))) { await sub.unsubscribe(); sub = null; }
+    }
+    if (!sub) {
+      try { sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }); }
+      catch (ex) { throw new Error("This device couldn't turn on notifications. Check that notifications are allowed for this app in the phone or browser settings, then try again."); }
+    }
+    await api('POST', 'push/subscribe', { subscription: sub.toJSON() });
+  }
+  async function disablePush() {
+    const sub = await currentSub();
+    if (sub) { await api('POST', 'push/unsubscribe', { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+  }
+  const IOS_HINT = `<p><b>On iPhone or iPad:</b> notifications only work when the app is on your Home Screen (iOS 16.4 or newer).</p>
+    <ol class="steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with arrow).</li>
+    <li>Tap <b>Add to Home Screen</b>.</li><li>Open the app from the Home Screen, sign in, and come back here.</li></ol>`;
+  async function renderPushCard(el, opts) {
+    opts = opts || {};
+    const st = await pushState();
+    if (opts.promptOnly && st !== 'off' && st !== 'ios-home') { el.innerHTML = ''; return; }
+    const head = `<h2>${ICONS.bell} Alerts on this device</h2>`;
+    let body = '';
+    if (st === 'on') body = `<p class="ok-line">Notifications are <b>ON</b> for this device.</p>
+        <div class="two-btns"><button type="button" class="btn btn-light" id="pushTest">Send a test</button>
+        <button type="button" class="btn btn-light" id="pushOff">Turn off</button></div>`;
+    else if (st === 'off') body = `<p>Get an alert on this device when someone adds or deletes an item.</p>
+        <button type="button" class="btn btn-primary btn-wide" id="pushOn">${ICONS.bell}<span>Turn on notifications on this device</span></button>
+        ${opts.promptOnly ? '<button type="button" class="btn btn-light btn-wide mt" id="pushLater">Not now</button>' : ''}
+        ${isIOS() ? '<p class="hint mt">iPhone: works only from the Home Screen app (iOS 16.4+).</p>' : ''}`;
+    else if (st === 'ios-home') body = IOS_HINT + (opts.promptOnly ? '<button type="button" class="btn btn-light btn-wide" id="pushLater">Not now</button>' : '');
+    else if (st === 'denied') body = `<p>Notifications are <b>blocked</b> for this app. To get alerts, allow notifications for this site in your phone or browser settings, then come back.</p>`;
+    else body = `<p>This browser can't show notifications. You will still see everything on this page.</p>`;
+    el.innerHTML = `<section class="panel push-card">${head}${body}${errorBox('pushErr')}</section>`;
+    const err = el.querySelector('#pushErr');
+    const on = el.querySelector('#pushOn');
+    if (on) on.addEventListener('click', () => withBusy(on, async () => {
+      try { await enablePush(); toast('Notifications turned on'); await renderPushCard(el, Object.assign({}, opts, { promptOnly: false })); }
+      catch (ex) { showError(err, ex.message || 'Could not turn on notifications.'); }
+    }));
+    const off = el.querySelector('#pushOff');
+    if (off) off.addEventListener('click', () => withBusy(off, async () => { await disablePush(); toast('Notifications turned off'); await renderPushCard(el, opts); }));
+    const test = el.querySelector('#pushTest');
+    if (test) test.addEventListener('click', () => withBusy(test, async () => {
+      try { await api('POST', 'push/test', {}); toast('Test sent'); } catch (ex) { showError(err, ex.message); }
+    }));
+    const later = el.querySelector('#pushLater');
+    if (later) later.addEventListener('click', () => { localStorage.setItem('pushPromptHidden', '1'); el.innerHTML = ''; });
+  }
+  function showHomePushPrompt(el) {
+    if (localStorage.getItem('pushPromptHidden') === '1') return;
+    renderPushCard(el, { promptOnly: true }).catch(() => {});
+  }
+
+  // ---------- notifications (admins) ----------
+  function notifHTML(n) {
+    const t = TYPES[n.itemType] || TYPES.material;
+    const sn = n.snapshot || {};
+    const verbs = { add: 'added', delete: 'deleted', restore: 'restored', edit: 'changed', qty: 'changed the quantity of' };
+    const thumb = n.thumbUrl ? `<img class="thumb" src="${esc(n.thumbUrl)}" alt="" loading="lazy">`
+      : `<div class="thumb thumb-empty ${t.key}" aria-hidden="true">${ICONS[t.key]}</div>`;
+    let line2 = '';
+    if (n.kind === 'qty') line2 = `Qty ${fmtQty(n.details.from)} → <b>${fmtQty(n.details.to)}</b>`;
+    else if (n.kind === 'edit') line2 = esc((n.details.changes || []).join(', '));
+    else line2 = `Qty ${fmtQty(sn.quantity)}${sn.location ? ' — ' + esc(sn.location) : ''}`;
+    const del = n.kind === 'delete';
+    return `<li class="notif ${n.read ? '' : 'unread'} kind-${n.kind}" data-id="${n.id}">
+      <button type="button" class="notif-main" data-open="${n.id}">
+        ${thumb}
+        <span class="notif-body">
+          <span class="notif-top"><span class="kind-tag kind-${n.kind}">${{ add: 'Added', delete: 'Deleted', restore: 'Restored', edit: 'Edited', qty: 'Quantity' }[n.kind]}</span>
+            ${n.read ? '' : '<span class="new-dot">New</span>'}</span>
+          <span class="notif-text"><b>${esc(n.mine ? 'You' : n.actorName)}</b> ${verbs[n.kind]} <b>${esc(sn.name)}</b></span>
+          <span class="notif-line">${line2}</span>
+          <span class="notif-when">${esc(fmtWhen(n.createdAt))}</span>
+        </span>
+      </button>
+      ${del ? `<div class="deleted-snap">
+          ${sn.description ? `<p class="pre">${esc(sn.description)}</p>` : ''}
+          ${n.itemDeleted ? `<button type="button" class="btn btn-primary btn-wide restore-btn" data-restore="${esc(n.itemId)}">Restore this ${t.one.toLowerCase()}</button>`
+            : (n.itemExists ? '<p class="restored-note">Back in the list (restored).</p>' : '<p class="muted">Removed for good.</p>')}
+        </div>` : ''}
+    </li>`;
+  }
+
+  async function renderNotifications() {
+    setHeader('Notifications', '#/');
+    app.innerHTML = `
+      <div id="pushCard"></div>
+      <div class="notif-tools">
+        <div class="seg" role="group" aria-label="Show">
+          <label><input type="radio" name="nf" value="key"><span>Adds &amp; deletes</span></label>
+          <label><input type="radio" name="nf" value="all"><span>Everything</span></label>
+        </div>
+        <div class="count-row"><p class="result-count" id="unreadLine"></p>
+          <button type="button" class="btn btn-light btn-small" id="markAll">Mark all read</button></div>
+      </div>
+      <ul class="notif-list" id="notifList"><li class="muted">Loading...</li></ul>
+      <button type="button" class="btn btn-light btn-wide mt" id="moreBtn" hidden>Show older</button>`;
+    renderPushCard(app.querySelector('#pushCard')).catch(() => {});
+    let list = [];
+    const ul = app.querySelector('#notifList'), more = app.querySelector('#moreBtn');
+    function paint(unread) {
+      setBadge(unread);
+      app.querySelector('#unreadLine').textContent = unread ? `${unread} new` : 'All caught up';
+      app.querySelector('#markAll').hidden = !unread;
+      ul.innerHTML = list.length ? list.map(notifHTML).join('') : '<li class="empty"><p>Nothing yet. When someone adds or deletes an item, it shows up here.</p></li>';
+    }
+    async function load(append) {
+      const before = append && list.length ? list[list.length - 1].id : '';
+      const r = await api('GET', 'notifications' + (before ? '?before=' + before : ''));
+      list = append ? list.concat(r.items) : r.items;
+      app.querySelectorAll('input[name=nf]').forEach(i => { i.checked = i.value === r.filter; });
+      more.hidden = !r.more;
+      paint(r.unread);
+    }
+    app.querySelectorAll('input[name=nf]').forEach(i => i.addEventListener('change', async () => {
+      try { await api('PUT', 'notifications/prefs', { filter: i.value }); await load(false); } catch (ex) { toast(ex.message); }
+    }));
+    app.querySelector('#markAll').addEventListener('click', async () => {
+      try { const r = await api('POST', 'notifications/read', { all: true }); list.forEach(n => { n.read = true; }); paint(r.unread); toast('All marked as read'); }
+      catch (ex) { toast(ex.message); }
+    });
+    more.addEventListener('click', () => withBusy(more, () => load(true)));
+    ul.addEventListener('click', async e => {
+      const rb = e.target.closest('[data-restore]');
+      if (rb) {
+        withBusy(rb, async () => {
+          try { await api('POST', `items/${encodeURIComponent(rb.dataset.restore)}/restore`, {}); toast('Restored'); await load(false); }
+          catch (ex) { toast(ex.message); }
+        });
+        return;
+      }
+      const ob = e.target.closest('[data-open]');
+      if (!ob) return;
+      const n = list.find(x => String(x.id) === ob.dataset.open);
+      if (!n) return;
+      if (!n.read) {
+        n.read = true;
+        api('POST', 'notifications/read', { ids: [n.id] }).then(r => setBadge(r.unread)).catch(() => {});
+      }
+      const t = TYPES[n.itemType] || TYPES.material;
+      if (n.itemExists && !n.itemDeleted) go(`#/${t.path}/${encodeURIComponent(n.itemId)}`);
+      else paint(Math.max(0, S.unread - 1));
+    });
+    pageRefresh = () => load(false);
+    await load(false);
   }
 
   // ---------- backup (admin) ----------
@@ -773,11 +975,12 @@
       if (S.setupNeeded) return renderSetup();
       if (!S.user) return renderLogin();
       if (S.user.mustChangePassword) return renderPasswordForm(true);
-      const adminPages = ['people', 'backup'];
+      const adminPages = ['people', 'backup', 'notifications'];
       if (adminPages.includes(parts[0]) && !isAdmin()) return go('#/');
       if (!parts.length) await renderHome();
       else if (parts[0] === 'account') parts[1] === 'password' ? renderPasswordForm(false) : renderAccount();
       else if (parts[0] === 'backup') renderBackup();
+      else if (parts[0] === 'notifications') await renderNotifications();
       else if (parts[0] === 'people') {
         if (!parts[1]) await renderPeople();
         else if (parts[1] === 'new') renderAddPerson();
@@ -797,19 +1000,26 @@
       const rb = document.getElementById('retryBtn'); if (rb) rb.addEventListener('click', route);
     }
     if (seq === renderSeq) window.scrollTo(0, 0);
+    if (parts[0] !== 'notifications') refreshUnread();
   }
 
   // Keep lists fresh for everyone: reload when the app comes back to the front, and every 30 seconds while open.
   let lastRefresh = 0;
   async function refreshQuietly() {
-    if (!pageRefresh || document.hidden || Date.now() - lastRefresh < 3000) return;
+    if (document.hidden || Date.now() - lastRefresh < 3000) return;
     lastRefresh = Date.now();
+    if (!pageRefresh || !location.hash.startsWith('#/notifications')) refreshUnread();
+    if (!pageRefresh) return;
     try { await pageRefresh(); } catch (e) { /* banner already shows connection problems */ }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshQuietly(); });
   window.addEventListener('focus', refreshQuietly);
   setInterval(refreshQuietly, 30000);
 
+  // A push arrived while the app is open: update the bell right away.
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'push') { refreshUnread(); if (location.hash.startsWith('#/notifications') && pageRefresh) pageRefresh().catch(() => {}); }
+  });
   window.addEventListener('hashchange', route);
   route();
 

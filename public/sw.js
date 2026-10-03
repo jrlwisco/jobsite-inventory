@@ -1,5 +1,5 @@
 /* Service worker: lets the app open with no internet. Bump VERSION when files change. */
-const VERSION = 'v2.0.0';
+const VERSION = 'v2.1.0';
 const SHELL = 'jobsite-inventory-' + VERSION;
 const API_CACHE = 'jobsite-api'; // last-seen lists/photos for viewing offline (cleared on sign-out)
 const FILES = [
@@ -55,4 +55,36 @@ self.addEventListener('fetch', e => {
     if (cached) { e.waitUntil(fresh); return cached; }
     return (await fresh) || new Response('Offline', { status: 504 });
   }));
+});
+
+// ---------- Web Push: alerts for admins ----------
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { body: e.data && e.data.text() }; }
+  const title = d.title || 'Job Site Inventory';
+  const scope = self.registration.scope;
+  e.waitUntil((async () => {
+    await self.registration.showNotification(title, {
+      body: d.body || '',
+      icon: scope + 'icons/icon-192.png',
+      badge: scope + 'icons/icon-192.png',
+      tag: d.tag || undefined,
+      data: { url: scope + (d.url || '#/notifications') }
+    });
+    if (typeof d.badge === 'number' && self.navigator.setAppBadge) { try { await self.navigator.setAppBadge(d.badge); } catch (err) { /* ignore */ } }
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    wins.forEach(w => w.postMessage({ type: 'push' }));
+  })());
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || self.registration.scope;
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const w of wins) {
+      if (w.url.startsWith(self.registration.scope)) { await w.focus(); try { await w.navigate(url); } catch (err) { /* ignore */ } return; }
+    }
+    await self.clients.openWindow(url);
+  })());
 });

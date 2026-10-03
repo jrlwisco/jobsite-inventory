@@ -54,6 +54,42 @@ function openDb(dataDir) {
       PRAGMA user_version = 1;
     `);
   }
+  if (db.pragma('user_version', { simple: true }) < 2) {
+    db.transaction(() => db.exec(`
+      ALTER TABLE items ADD COLUMN deleted_at INTEGER;
+      ALTER TABLE items ADD COLUMN deleted_by_name TEXT;
+      ALTER TABLE users ADD COLUMN notif_filter TEXT NOT NULL DEFAULT 'key';
+      ALTER TABLE users ADD COLUMN notif_read_upto INTEGER NOT NULL DEFAULT 0;
+      -- Activity feed for admins: one row per add / delete / restore / edit / quantity change
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('add','delete','restore','edit','qty')),
+        item_id TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        actor_id INTEGER,
+        actor_name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        snapshot TEXT NOT NULL,       -- JSON: name, quantity, location, description, photo/thumb at that moment
+        details TEXT                  -- JSON: changes list, quantity from/to
+      );
+      CREATE INDEX IF NOT EXISTS events_item ON events(item_id);
+      CREATE TABLE IF NOT EXISTS event_reads (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        PRIMARY KEY (user_id, event_id)
+      );
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        user_agent TEXT
+      );
+      DELETE FROM settings WHERE key = 'crew_can_delete';
+      PRAGMA user_version = 2;
+    `))();
+  }
   return db;
 }
 module.exports = { openDb };
