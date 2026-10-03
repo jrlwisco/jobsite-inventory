@@ -1,7 +1,7 @@
 {
   "name": "Job Site Inventory",
   "short_name": "Inventory",
-  "description": "Keep track of materials and tools: what you have, how many, and where it is.",
+  "description": "Keep track of materials, tools and equipment: what you have, how many, and where it is.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -230,7 +230,8 @@ const userCount = () => db.prepare('SELECT COUNT(*) c FROM users').get().c;
 app.get('/api/state', (req, res) => {
   res.json({
     setupNeeded: userCount() === 0, setupCodeRequired: !!SETUP_CODE, user: publicUser(req.user), settings: settingsObj(),
-    unread: req.user && req.user.role === 'admin' && !req.user.mustChangePassword ? unreadCount(req.user.id) : 0
+    unread: req.user && !req.user.mustChangePassword ? unreadCount(req.user.id) : 0,
+    inbox: req.user && req.user.role === 'admin' && !req.user.mustChangePassword ? inboxCounts() : null
   });
 });
 
@@ -297,12 +298,25 @@ function itemOut(r) {
   return {
     id: r.id, type: r.type, name: r.name, quantity: r.quantity, location: r.location, description: r.description,
     photoUrl: r.photo ? 'api/photos/' + r.photo : '', thumbUrl: r.thumb ? 'api/photos/' + r.thumb : '',
-    createdAt: r.created_at, createdByName: r.created_by_name || '', updatedAt: r.updated_at, updatedByName: r.updated_by_name || ''
+    createdAt: r.created_at, createdByName: r.created_by_name || '', updatedAt: r.updated_at, updatedByName: r.updated_by_name || '',
+    ...(r.type === 'equipment' ? {
+      meterUnit: r.meter_unit || 'hours', meterValue: r.meter_value, meterUpdatedAt: r.meter_updated_at, meterUpdatedByName: r.meter_updated_by_name || '',
+      repairStatus: repairStatusOf(r.id)
+    } : {})
   };
 }
+const TYPES = ['material', 'tool', 'equipment'];
+// Worst open repair request decides the badge: down > requested > in progress.
+function repairStatusOf(itemId) {
+  const rows = db.prepare("SELECT urgency, status FROM repair_requests WHERE item_id = ? AND status IN ('open','in_progress')").all(itemId);
+  if (!rows.length) return null;
+  const level = rows.some(r => r.urgency === 'down') ? 'down' : rows.some(r => r.status === 'open') ? 'requested' : 'in_progress';
+  return { level, open: rows.length };
+}
 function readItemBody(b) {
-  if (b.type !== 'material' && b.type !== 'tool') throw bad('Type must be material or tool.');
+  if (!TYPES.includes(b.type)) throw bad('Type must be material, tool or equipment.');
   return {
+    meterUnit: b.type === 'equipment' ? (b.meterUnit === 'miles' ? 'miles' : 'hours') : null,
     type: b.type,
     name: str(b.name, { max: 120, required: true, label: 'Name' }),
     quantity: qty(b.quantity ?? 0),
@@ -314,9 +328,12 @@ const getItem = id => db.prepare('SELECT * FROM items WHERE id = ? AND deleted_a
 const getAnyItem = id => db.prepare('SELECT * FROM items WHERE id = ?').get(String(id));
 
 // ---------- activity feed (notifications for admins) ----------
-const KEY_KINDS = ['add', 'delete', 'restore'];
+// "Important" kinds (default filter). Pushed to admins: PUSH_KINDS.
+const KEY_KINDS = ['add', 'delete', 'restore', 'approval', 'repair', 'meter_low', 'request_result', 'repair_status'];
+const PUSH_KINDS = ['add', 'delete', 'restore', 'approval', 'repair'];
 const snapshotOf = r => ({ name: r.name, type: r.type, quantity: r.quantity, location: r.location, description: r.description, photo: r.photo, thumb: r.thumb });
-function recordEvent(kind, row, user, details) {
+function recordEvent(kind, row, user, details, opts) {
+  opts = opts || {};
   const t = now();
   // Many +/- taps by the same person on the same item within 10 minutes become one entry.
   if (kind === 'qty') {
@@ -326,39 +343,51 @@ function recordEvent(kind, row, user, details) {
       db.prepare('DELETE FROM events WHERE id = ?').run(last.id); // replaced by a fresh (unread) entry below
     }
   }
-  const id = db.prepare('INSERT INTO events (kind, item_id, item_type, actor_id, actor_name, created_at, snapshot, details) VALUES (?,?,?,?,?,?,?,?)')
-    .run(kind, row.id, row.type, user.id, user.name, t, JSON.stringify(snapshotOf(row)), details ? JSON.stringify(details) : null).lastInsertRowid;
-  if (KEY_KINDS.includes(kind)) setImmediate(() => pushToAdmins(id));
+  const id = db.prepare('INSERT INTO events (kind, item_id, item_type, actor_id, actor_name, created_at, snapshot, details, recipient_id, ref_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(kind, row.id, row.type, user.id, user.name, t, JSON.stringify(snapshotOf(row)), details ? JSON.stringify(details) : null, opts.recipientId ?? null, opts.refId ?? null).lastInsertRowid;
+  if (opts.recipientId) setImmediate(() => pushToAdmins(id, opts.recipientId));
+  else if (PUSH_KINDS.includes(kind)) setImmediate(() => pushToAdmins(id));
   return id;
 }
-function filterSql(filter) { return filter === 'all' ? '' : " AND e.kind IN ('add','delete','restore')"; }
+function filterSql(filter) { return filter === 'all' ? '' : ` AND e.kind IN (${KEY_KINDS.map(k => `'${k}'`).join(',')})`; }
+// Admins see the shared feed plus notices meant for them; crew see only notices meant for them.
+function audienceSql(role) { return role === 'admin' ? ' AND (e.recipient_id IS NULL OR e.recipient_id = @me)' : ' AND e.recipient_id = @me'; }
 function unreadCount(userId) {
-  const u = db.prepare('SELECT notif_filter, notif_read_upto FROM users WHERE id = ?').get(userId);
+  const u = db.prepare('SELECT role, notif_filter, notif_read_upto FROM users WHERE id = ?').get(userId);
   if (!u) return 0;
-  return db.prepare(`SELECT COUNT(*) c FROM events e WHERE e.id > ? AND (e.actor_id IS NULL OR e.actor_id != ?) ${filterSql(u.notif_filter)}
-    AND NOT EXISTS (SELECT 1 FROM event_reads r WHERE r.user_id = ? AND r.event_id = e.id)`).get(u.notif_read_upto, userId, userId).c;
+  return db.prepare(`SELECT COUNT(*) c FROM events e WHERE e.id > @upto AND (e.actor_id IS NULL OR e.actor_id != @me) ${audienceSql(u.role)} ${u.role === 'admin' ? filterSql(u.notif_filter) : ''}
+    AND NOT EXISTS (SELECT 1 FROM event_reads r WHERE r.user_id = @me AND r.event_id = e.id)`).get({ upto: u.notif_read_upto, me: userId }).c;
 }
 function eventText(e, snap, d) {
-  const what = snap.type === 'tool' ? 'tool' : 'material';
+  const what = ({ tool: 'tool', equipment: 'machine' })[snap.type] || 'material';
   const where = snap.location ? ` — ${snap.location}` : '';
   switch (e.kind) {
     case 'add': return { title: `${e.actor_name} added a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
     case 'delete': return { title: `${e.actor_name} deleted a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
     case 'restore': return { title: `${e.actor_name} restored a ${what}`, body: `${snap.name} — Qty ${fmtNum(snap.quantity)}${where}` };
     case 'qty': return { title: `${e.actor_name} changed a quantity`, body: `${snap.name}: ${fmtNum(d.from)} → ${fmtNum(d.to)}` };
+    case 'meter_low': return { title: `${e.actor_name} entered LOWER ${d.unit} than before`, body: `${snap.name}: ${fmtNum(d.from)} → ${fmtNum(d.to)} ${d.unit}` };
+    case 'record': return { title: `${e.actor_name} logged ${d.kind === 'repair' ? 'a repair' : 'maintenance'}`, body: `${snap.name}: ${d.work || ''}`.slice(0, 180) };
+    case 'record_edit': return { title: `${e.actor_name} changed a ${d.kind === 'repair' ? 'repair' : 'maintenance'} record`, body: `${snap.name}: ${(d.changes || []).join(', ')}` };
+    case 'approval': return { title: `Approval needed: ${e.actor_name} asks to ${d.kind === 'delete' ? 'delete' : 'change'} a record`, body: `${snap.name}: ${d.kind === 'delete' ? (d.summary || '') : (d.changes || []).join(', ')}${d.reason ? ' — "' + d.reason + '"' : ''}`.slice(0, 220) };
+    case 'repair': return { title: `Repair requested${d.urgency === 'down' ? ' — DOWN' : d.urgency === 'soon' ? ' — soon' : ''}: ${snap.name}`, body: `${e.actor_name}: ${d.problem || ''}`.slice(0, 200) };
+    case 'request_result': return { title: `Your change was ${d.approved ? 'approved' : 'not approved'}`, body: `${snap.name} — by ${e.actor_name}${d.note ? ': ' + d.note : ''}` };
+    case 'repair_status': return { title: `Repair request: ${({ in_progress: 'In progress', done: 'Done', declined: 'Declined', open: 'Open' })[d.status] || d.status}`, body: `${snap.name} — by ${e.actor_name}${d.note ? ': ' + d.note : ''}` };
     default: return { title: `${e.actor_name} edited a ${what}`, body: `${snap.name}: ${(d.changes || []).join(', ')}` };
   }
 }
 function fmtNum(n) { const v = Number(n); return Number.isFinite(v) ? String(Math.round(v * 100) / 100) : '0'; }
-async function pushToAdmins(eventId) {
+async function pushToAdmins(eventId, onlyUserId) {
   const e = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
   if (!e) return;
   const snap = JSON.parse(e.snapshot), d = JSON.parse(e.details || '{}');
   const text = eventText(e, snap, d);
-  const subs = db.prepare(`SELECT s.*, u.id AS uid FROM push_subscriptions s JOIN users u ON u.id = s.user_id
+  const subs = onlyUserId
+    ? db.prepare('SELECT s.*, u.id AS uid FROM push_subscriptions s JOIN users u ON u.id = s.user_id WHERE u.id = ? AND u.disabled = 0').all(onlyUserId)
+    : db.prepare(`SELECT s.*, u.id AS uid FROM push_subscriptions s JOIN users u ON u.id = s.user_id
     WHERE u.role = 'admin' AND u.disabled = 0 AND u.id != ?`).all(e.actor_id ?? -1);
   await Promise.all(subs.map(async s => {
-    const payload = JSON.stringify({ title: text.title, body: text.body, url: '#/notifications', tag: 'event-' + e.id, badge: unreadCount(s.uid) });
+    const payload = JSON.stringify({ title: text.title, body: text.body, url: e.recipient_id ? '#/requests' : '#/notifications', tag: 'event-' + e.id, badge: unreadCount(s.uid) });
     try {
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 24 * 3600, urgency: 'normal' });
     } catch (err) {
@@ -370,7 +399,7 @@ async function pushToAdmins(eventId) {
 
 app.get('/api/items', auth, (req, res) => {
   const t = req.query.type;
-  const rows = (t === 'material' || t === 'tool')
+  const rows = TYPES.includes(t)
     ? db.prepare('SELECT * FROM items WHERE type = ? AND deleted_at IS NULL ORDER BY name COLLATE NOCASE').all(t)
     : db.prepare('SELECT * FROM items WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE').all();
   res.json({ items: rows.map(itemOut) });
@@ -387,9 +416,13 @@ app.post('/api/items', auth, (req, res) => {
   const files = req.body.photo ? savePhotos(req.body.photo, req.body.thumb) : { photo: null, thumb: null };
   const id = crypto.randomUUID();
   const t = now();
+  const meter = v.type === 'equipment' && req.body.meterValue !== undefined && req.body.meterValue !== null && req.body.meterValue !== '' ? meterNum(req.body.meterValue) : null;
   try {
-    db.prepare(`INSERT INTO items (id, type, name, quantity, location, description, photo, thumb, created_at, created_by_name, updated_at, updated_by, updated_by_name)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, v.type, v.name, v.quantity, v.location, v.description, files.photo, files.thumb, t, req.user.name, t, req.user.id, req.user.name);
+    db.transaction(() => {
+      db.prepare(`INSERT INTO items (id, type, name, quantity, location, description, photo, thumb, created_at, created_by_name, updated_at, updated_by, updated_by_name, meter_unit)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, v.type, v.name, v.quantity, v.location, v.description, files.photo, files.thumb, t, req.user.name, t, req.user.id, req.user.name, v.meterUnit);
+      if (meter !== null) addReading(id, meter, v.meterUnit, req.user, null);
+    })();
   } catch (e) { removePhotoFiles(files.photo, files.thumb); throw e; }
   const row = getItem(id);
   recordEvent('add', row, req.user);
@@ -409,8 +442,9 @@ app.put('/api/items/:id', auth, (req, res) => {
   if (v.location !== old.location) changes.push(`location ${old.location || '(none)'} → ${v.location || '(none)'}`);
   if (v.description !== old.description) changes.push('description');
   if (photo !== old.photo) changes.push(photo ? (old.photo ? 'new photo' : 'added photo') : 'removed photo');
-  db.prepare(`UPDATE items SET name=?, quantity=?, location=?, description=?, photo=?, thumb=?, updated_at=?, updated_by=?, updated_by_name=? WHERE id=?`)
-    .run(v.name, v.quantity, v.location, v.description, photo, thumb, now(), req.user.id, req.user.name, old.id);
+  if (old.type === 'equipment' && v.meterUnit !== (old.meter_unit || 'hours')) changes.push(`counts ${v.meterUnit}`);
+  db.prepare(`UPDATE items SET name=?, quantity=?, location=?, description=?, photo=?, thumb=?, updated_at=?, updated_by=?, updated_by_name=?, meter_unit=COALESCE(?, meter_unit) WHERE id=?`)
+    .run(v.name, v.quantity, v.location, v.description, photo, thumb, now(), req.user.id, req.user.name, v.meterUnit, old.id);
   if (photo !== old.photo) removePhotoFiles(old.photo, old.thumb);
   const row = getItem(old.id);
   if (changes.length) recordEvent('edit', row, req.user, { changes });
@@ -453,20 +487,29 @@ app.post('/api/items/:id/restore', adminOnly, (req, res) => {
 // Deleted items are removed for good after DELETED_KEEP_DAYS (default 90).
 function purgeDeleted() {
   const old = db.prepare('SELECT id, photo, thumb FROM items WHERE deleted_at IS NOT NULL AND deleted_at < ?').all(now() - DELETED_KEEP_DAYS * 86400000);
-  for (const r of old) { db.prepare('DELETE FROM items WHERE id = ?').run(r.id); removePhotoFiles(r.photo, r.thumb); }
+  for (const r of old) {
+    for (const rec of db.prepare('SELECT photos FROM maint_records WHERE item_id = ?').all(r.id)) JSON.parse(rec.photos || '[]').forEach(p => removePhotoFiles(p.photo, p.thumb));
+    for (const rr of db.prepare('SELECT photo, thumb FROM repair_requests WHERE item_id = ?').all(r.id)) removePhotoFiles(rr.photo, rr.thumb);
+    db.transaction(() => {
+      db.prepare('DELETE FROM record_audit WHERE record_id IN (SELECT id FROM maint_records WHERE item_id = ?)').run(r.id);
+      ['maint_records', 'meter_readings', 'change_requests', 'repair_requests'].forEach(tb => db.prepare(`DELETE FROM ${tb} WHERE item_id = ?`).run(r.id));
+      db.prepare('DELETE FROM items WHERE id = ?').run(r.id);
+    })();
+    removePhotoFiles(r.photo, r.thumb);
+  }
 }
 setInterval(purgeDeleted, 6 * 3600 * 1000).unref();
 setTimeout(purgeDeleted, 10000).unref();
 
 // ---------- notifications (admins) ----------
-app.get('/api/notifications', adminOnly, (req, res) => {
-  const me = db.prepare('SELECT notif_filter, notif_read_upto FROM users WHERE id = ?').get(req.user.id);
+app.get('/api/notifications', auth, (req, res) => {
+  const me = db.prepare('SELECT role, notif_filter, notif_read_upto FROM users WHERE id = ?').get(req.user.id);
   const before = Number(req.query.before) || Number.MAX_SAFE_INTEGER;
   const limit = Math.min(100, Number(req.query.limit) || 40);
   const rows = db.prepare(`SELECT e.*, i.deleted_at AS item_deleted_at, i.thumb AS item_thumb, (i.id IS NOT NULL) AS item_exists,
-      EXISTS (SELECT 1 FROM event_reads r WHERE r.user_id = ? AND r.event_id = e.id) AS is_read
+      EXISTS (SELECT 1 FROM event_reads r WHERE r.user_id = @me AND r.event_id = e.id) AS is_read
     FROM events e LEFT JOIN items i ON i.id = e.item_id
-    WHERE e.id < ? ${filterSql(me.notif_filter)} ORDER BY e.created_at DESC, e.id DESC LIMIT ?`).all(req.user.id, before, limit + 1);
+    WHERE e.id < @before ${audienceSql(me.role)} ${me.role === 'admin' ? filterSql(me.notif_filter) : ''} ORDER BY e.created_at DESC, e.id DESC LIMIT @lim`).all({ me: req.user.id, before, lim: limit + 1 });
   const more = rows.length > limit;
   const list = rows.slice(0, limit).map(e => {
     const snap = JSON.parse(e.snapshot), d = JSON.parse(e.details || '{}');
@@ -477,13 +520,27 @@ app.get('/api/notifications', adminOnly, (req, res) => {
       itemExists: !!e.item_exists, itemDeleted: !!e.item_deleted_at,
       thumbUrl: thumb ? 'api/photos/' + thumb : (e.kind === 'delete' && e.item_exists && snap.thumb ? 'api/photos/' + snap.thumb : ''),
       snapshot: { name: snap.name, quantity: snap.quantity, location: snap.location, description: snap.description, type: snap.type },
-      details: d, text: eventText(e, snap, d)
+      details: d, text: eventText(e, snap, d), refId: e.ref_id, forMe: e.recipient_id === req.user.id,
+      refStatus: refStatusOf(e)
     };
   });
   res.json({ items: list, more, unread: unreadCount(req.user.id), filter: me.notif_filter });
 });
-app.get('/api/notifications/unread', adminOnly, (req, res) => res.json({ unread: unreadCount(req.user.id) }));
-app.post('/api/notifications/read', adminOnly, (req, res) => {
+// Current state of the request a notification is about (so old "Approval needed" entries show "Approved by Sara").
+function refStatusOf(e) {
+  if (!e.ref_id) return null;
+  if (e.kind === 'approval') {
+    const r = db.prepare('SELECT status, decided_by_name, decision_note FROM change_requests WHERE id = ?').get(e.ref_id);
+    return r ? { status: r.status, by: r.decided_by_name, note: r.decision_note } : null;
+  }
+  if (e.kind === 'repair') {
+    const r = db.prepare('SELECT status, status_by_name, status_note FROM repair_requests WHERE id = ?').get(e.ref_id);
+    return r ? { status: r.status, by: r.status_by_name, note: r.status_note } : null;
+  }
+  return null;
+}
+app.get('/api/notifications/unread', auth, (req, res) => res.json({ unread: unreadCount(req.user.id) }));
+app.post('/api/notifications/read', auth, (req, res) => {
   if (req.body.all) {
     const max = (db.prepare('SELECT MAX(id) m FROM events').get().m) || 0;
     db.prepare('UPDATE users SET notif_read_upto = ? WHERE id = ?').run(max, req.user.id);
@@ -606,14 +663,15 @@ app.get('/api/backup', adminOnly, (req, res) => {
   const items = db.prepare('SELECT * FROM items WHERE deleted_at IS NULL ORDER BY created_at').all().map(r => ({
     id: r.id, type: r.type, name: r.name, quantity: r.quantity, location: r.location, description: r.description,
     photo: photoToDataUrl(r.photo), thumb: photoToDataUrl(r.thumb),
-    createdAt: r.created_at, createdByName: r.created_by_name, updatedAt: r.updated_at, updatedByName: r.updated_by_name
+    createdAt: r.created_at, createdByName: r.created_by_name, updatedAt: r.updated_at, updatedByName: r.updated_by_name,
+    meterUnit: r.meter_unit, meterValue: r.meter_value, meterUpdatedAt: r.meter_updated_at, meterUpdatedByName: r.meter_updated_by_name
   }));
   const users = db.prepare('SELECT * FROM users').all().map(u => ({
     username: u.username, name: u.name, role: u.role, disabled: !!u.disabled, passwordHash: u.password_hash, createdAt: u.created_at
   }));
   const d = new Date().toISOString().slice(0, 10);
   res.set('Content-Disposition', `attachment; filename="inventory-backup-${d}.json"`);
-  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 2, exportedAt: new Date().toISOString(), settings: settingsObj(), users, items }));
+  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 3, exportedAt: new Date().toISOString(), settings: settingsObj(), users, items, equipment: equipment.exportData() }));
 });
 
 app.post('/api/restore', adminOnly, (req, res) => {
@@ -621,7 +679,7 @@ app.post('/api/restore', adminOnly, (req, res) => {
   const list = Array.isArray(data) ? data : data && data.items;
   if (!Array.isArray(list)) throw bad('This is not an inventory backup file.');
   const isV1 = !(data && data.version >= 2);
-  let items = 0, people = 0, skipped = 0;
+  let items = 0, people = 0, skipped = 0, eqCounts = { records: 0, repairs: 0 };
   const written = [];
   const tx = db.transaction(() => {
     for (const raw of list) {
@@ -634,17 +692,20 @@ app.post('/api/restore', adminOnly, (req, res) => {
         const old = getAnyItem(id);
         const created = Number(raw.createdAt) || now(), updated = Number(raw.updatedAt) || now();
         const byName = isV1 ? `${req.user.name} (from old version)` : (str(raw.updatedByName, { max: 60 }) || req.user.name);
-        db.prepare(`INSERT INTO items (id, type, name, quantity, location, description, photo, thumb, created_at, created_by_name, updated_at, updated_by, updated_by_name)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?)
-          ON CONFLICT(id) DO UPDATE SET type=excluded.type, name=excluded.name, quantity=excluded.quantity, location=excluded.location,
+        const mv = v.type === 'equipment' && raw.meterValue != null && Number.isFinite(Number(raw.meterValue)) ? Number(raw.meterValue) : null;
+        db.prepare(`INSERT INTO items (id, type, name, quantity, location, description, photo, thumb, created_at, created_by_name, updated_at, updated_by, updated_by_name, meter_unit, meter_value, meter_updated_at, meter_updated_by_name)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET meter_unit=excluded.meter_unit, meter_value=excluded.meter_value, meter_updated_at=excluded.meter_updated_at, meter_updated_by_name=excluded.meter_updated_by_name, type=excluded.type, name=excluded.name, quantity=excluded.quantity, location=excluded.location,
             description=excluded.description, photo=excluded.photo, thumb=excluded.thumb, updated_at=excluded.updated_at, updated_by=NULL, updated_by_name=excluded.updated_by_name,
             deleted_at=NULL, deleted_by_name=NULL`)
           .run(id, v.type, v.name, v.quantity, v.location, v.description, files.photo, files.thumb, created,
-            isV1 ? byName : (str(raw.createdByName, { max: 60 }) || byName), updated, byName);
+            isV1 ? byName : (str(raw.createdByName, { max: 60 }) || byName), updated, byName,
+            v.meterUnit, mv, mv !== null ? (Number(raw.meterUpdatedAt) || updated) : null, mv !== null ? (str(raw.meterUpdatedByName, { max: 60 }) || byName) : null);
         if (old) removePhotoFiles(old.photo, old.thumb);
         items++;
       } catch (e) { if (e instanceof HttpError) skipped++; else throw e; }
     }
+    if (!isV1 && data.equipment) eqCounts = equipment.importData(data.equipment, written);
     if (!isV1 && Array.isArray(data.users)) {
       for (const u of data.users) {
         try {
@@ -659,8 +720,14 @@ app.post('/api/restore', adminOnly, (req, res) => {
     }
   });
   try { tx(); } catch (e) { removePhotoFiles(...written); throw e; }
-  res.json({ items, people, skipped, fromOldVersion: isV1 });
+  res.json({ items, people, skipped, fromOldVersion: isV1, records: eqCounts.records, repairs: eqCounts.repairs });
 });
+
+// ---------- equipment: meter readings, maintenance records, change approvals, repair requests ----------
+const equipment = require('./equipment')({
+  app, db, auth, adminOnly, str, bad, HttpError, now, savePhotos, removePhotoFiles, photoToDataUrl, getItem, itemOut, recordEvent, fmtNum
+});
+const { addReading, meterNum, inboxCounts } = equipment;
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 

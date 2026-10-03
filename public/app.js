@@ -4,13 +4,18 @@
 
   const TYPES = {
     material: { key: 'material', path: 'materials', one: 'Material', many: 'Materials' },
-    tool: { key: 'tool', path: 'tools', one: 'Tool', many: 'Tools' }
+    tool: { key: 'tool', path: 'tools', one: 'Tool', many: 'Tools' },
+    equipment: { key: 'equipment', path: 'equipment', one: 'Equipment', many: 'Equipment', title: 'Equipment & Maintenance', countOne: 'machine', countMany: 'machines' }
   };
-  const byPath = { materials: TYPES.material, tools: TYPES.tool };
+  const byPath = { materials: TYPES.material, tools: TYPES.tool, equipment: TYPES.equipment };
 
   const ICONS = {
     material: '<svg viewBox="0 0 48 48" aria-hidden="true"><g fill="currentColor"><rect x="4" y="30" width="18" height="12" rx="1.5"/><rect x="26" y="30" width="18" height="12" rx="1.5"/><rect x="15" y="16" width="18" height="12" rx="1.5"/><rect x="4" y="16" width="9" height="12" rx="1.5"/><rect x="35" y="16" width="9" height="12" rx="1.5"/><rect x="4" y="4" width="18" height="10" rx="1.5"/><rect x="26" y="4" width="18" height="10" rx="1.5"/></g></svg>',
     tool: '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="currentColor" d="M41.6 11.2 35 17.8l-4.8-4.8 6.6-6.6a11 11 0 0 0-14.3 13.6L6.3 36.2a3.4 3.4 0 0 0 0 4.8l.7.7a3.4 3.4 0 0 0 4.8 0l16.2-16.2A11 11 0 0 0 41.6 11.2z"/></svg>',
+    equipment: '<svg viewBox="0 0 48 48" aria-hidden="true"><g fill="currentColor"><rect x="3" y="35" width="28" height="9" rx="4.5"/><rect x="7" y="23" width="18" height="11" rx="2"/><rect x="10" y="15" width="10" height="9" rx="1.5"/><path d="M38 24h8l-2.5 9h-6.5z"/></g><path d="M23 27 34 10l7 14" fill="none" stroke="currentColor" stroke-width="4.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+    gauge: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 4a10 10 0 0 0-8.66 15h17.32A10 10 0 0 0 12 4zm0 2a8 8 0 0 1 7.4 11H4.6A8 8 0 0 1 12 6zm4.2 2.4-5 5.3a1.6 1.6 0 1 0 2.2 2.2z"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.8 5.6 17.5 8.9 15.1 6.5l3.3-3.3a5.5 5.5 0 0 0-7.1 6.8L3.2 18.1a1.7 1.7 0 0 0 0 2.4l.3.3a1.7 1.7 0 0 0 2.4 0l8.1-8.1a5.5 5.5 0 0 0 6.8-7.1z"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z"/></svg>',
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.6"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
     pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>',
     camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg>',
@@ -31,8 +36,8 @@
   const bellBadge = document.getElementById('bellBadge');
   const banner = document.getElementById('offlineBanner');
   let backTarget = '#/';
-  const searchState = { home: '', material: { q: '', loc: '' }, tool: { q: '', loc: '' } };
-  const S = { user: null, settings: {}, setupNeeded: false, setupCodeRequired: false, lastPassword: '', unread: 0 };
+  const searchState = { home: '', material: { q: '', loc: '' }, tool: { q: '', loc: '' }, equipment: { q: '', loc: '', needs: false } };
+  const S = { user: null, settings: {}, setupNeeded: false, setupCodeRequired: false, lastPassword: '', unread: 0, inbox: null };
   let pageRefresh = null;
   const itemCache = new Map(); // last-seen items, used to show details when offline // set by pages that can quietly reload their data
 
@@ -61,7 +66,7 @@
       acctBtn.hidden = false;
       acctBtn.querySelector('span').textContent = firstName(S.user.name);
     } else acctBtn.hidden = true;
-    bellBtn.hidden = acctBtn.hidden || !isAdmin();
+    bellBtn.hidden = acctBtn.hidden;
     setBadge(S.unread);
   }
   function setBadge(n) {
@@ -69,13 +74,13 @@
     bellBadge.hidden = !S.unread;
     bellBadge.textContent = S.unread > 99 ? '99+' : String(S.unread);
     bellBtn.setAttribute('aria-label', S.unread ? `Notifications, ${S.unread} new` : 'Notifications');
-    if (isAdmin() && navigator.setAppBadge) { (S.unread ? navigator.setAppBadge(S.unread) : navigator.clearAppBadge()).catch(() => {}); }
+    if (S.user && navigator.setAppBadge) { (S.unread ? navigator.setAppBadge(S.unread) : navigator.clearAppBadge()).catch(() => {}); }
   }
   async function refreshUnread() {
-    if (!isAdmin() || (S.user && S.user.mustChangePassword)) return;
+    if (!S.user || S.user.mustChangePassword) return;
     try { setBadge((await api('GET', 'notifications/unread')).unread); } catch (e) { /* ignore */ }
   }
-  bellBtn.addEventListener('click', () => go('#/notifications'));
+  bellBtn.addEventListener('click', () => go(isAdmin() ? '#/notifications' : '#/requests'));
   backBtn.addEventListener('click', () => go(backTarget));
   acctBtn.addEventListener('click', () => go('#/account'));
 
@@ -141,14 +146,15 @@
 
   async function loadState() {
     const s = await api('GET', 'state');
-    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.unread = s.unread || 0;
+    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.unread = s.unread || 0; S.inbox = s.inbox || null;
   }
 
   // Search: every word typed must appear somewhere in name, quantity, location or description.
   function matches(item, query) {
     const words = String(query || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
     if (!words.length) return true;
-    const hay = [item.name, fmtQty(item.quantity), item.location, item.description].join(' \u0001 ').toLowerCase();
+    const hay = [item.name, fmtQty(item.quantity), item.location, item.description,
+      item.meterValue != null ? fmtQty(item.meterValue) : '', item.repairStatus ? 'repair needs repair ' + item.repairStatus.level.replace('_', ' ') : ''].join(' \u0001 ').toLowerCase();
     return words.every(w => hay.includes(w));
   }
   const sortItems = items => items.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base', numeric: true }));
@@ -187,7 +193,9 @@
       <div class="card-body">
         ${showType ? `<span class="tag ${t.key}">${t.one}</span>` : ''}
         <span class="card-name">${esc(item.name) || '(no name)'}</span>
-        <span class="card-qty">Qty: <b>${fmtQty(item.quantity)}</b></span>
+        ${t.key === 'equipment' ? `${statusBadge(item.repairStatus)}
+          <span class="card-qty">${ICONS.gauge}<b>${item.meterValue != null ? fmtMeter(item.meterValue, item.meterUnit) : 'No ' + item.meterUnit + ' yet'}</b></span>`
+          : `<span class="card-qty">Qty: <b>${fmtQty(item.quantity)}</b></span>`}
         ${item.location ? `<span class="card-loc">${ICONS.pin}${esc(item.location)}</span>` : ''}
       </div></a></li>`;
   }
@@ -353,6 +361,7 @@
     setHeader('Inventory', null);
     app.innerHTML = `
       <p class="hello">Signed in as <b>${esc(S.user.name)}</b> <span class="role-tag ${S.user.role}">${isAdmin() ? 'Admin' : 'Crew'}</span></p>
+      ${isAdmin() ? '<div id="needsOkBanner"></div>' : ''}
       <div id="pushPrompt"></div>
       <section class="home-search">
         ${searchBoxHTML('homeSearch', 'Search everything', searchState.home)}
@@ -360,8 +369,9 @@
         <ul class="cards" id="homeResults"></ul>
       </section>
       <div class="home-buttons" id="homeButtons">
-        <a class="big-btn material" href="#/materials">${ICONS.material}<span class="big-label">Materials</span><span class="big-count" id="nMat">&nbsp;</span></a>
-        <a class="big-btn tool" href="#/tools">${ICONS.tool}<span class="big-label">Tools</span><span class="big-count" id="nTool">&nbsp;</span></a>
+        <a class="big-btn material" href="#/materials">${ICONS.material}<span class="bb-text"><span class="big-label">Materials</span><span class="big-count" id="nMat">&nbsp;</span></span></a>
+        <a class="big-btn tool" href="#/tools">${ICONS.tool}<span class="bb-text"><span class="big-label">Tools</span><span class="big-count" id="nTool">&nbsp;</span></span></a>
+        <a class="big-btn equipment" href="#/equipment">${ICONS.equipment}<span class="bb-text"><span class="big-label">Equipment &amp; Maintenance</span><span class="big-count" id="nEq">&nbsp;</span></span></a>
         ${isAdmin() ? `<div class="admin-links">
           <a class="btn btn-light" href="#/people">${ICONS.people}<span>People</span></a>
           <a class="btn btn-light" href="#/backup">${ICONS.box}<span>Backup</span></a></div>` : ''}
@@ -380,10 +390,13 @@
     async function load() {
       const r = await api('GET', 'items');
       items = r.items; items.forEach(i => itemCache.set(i.id, i));
-      const nm = items.filter(i => i.type === 'material').length, nt = items.length - nm;
-      const a = app.querySelector('#nMat'), b = app.querySelector('#nTool');
+      const nm = items.filter(i => i.type === 'material').length, nt = items.filter(i => i.type === 'tool').length;
+      const eq = items.filter(i => i.type === 'equipment'), ne = eq.length, broken = eq.filter(i => i.repairStatus).length;
+      const a = app.querySelector('#nMat'), b = app.querySelector('#nTool'), c = app.querySelector('#nEq');
       if (a) a.textContent = `${nm} ${nm === 1 ? 'item' : 'items'}`;
       if (b) b.textContent = `${nt} ${nt === 1 ? 'item' : 'items'}`;
+      if (c) c.textContent = `${ne} ${ne === 1 ? 'machine' : 'machines'}${broken ? ` · ${broken} need${broken === 1 ? 's' : ''} repair` : ''}`;
+      if (isAdmin()) { try { const st = await api('GET', 'state'); S.inbox = st.inbox; setBadge(st.unread); } catch (e) { /* ignore */ } paintNeedsOk(); }
       update(searchState.home);
     }
     wireSearch(app, 'homeSearch', update);
@@ -392,15 +405,27 @@
     await load();
   }
 
+  function paintNeedsOk() {
+    const el = app.querySelector('#needsOkBanner');
+    if (!el) return;
+    const ib = S.inbox || {};
+    const parts = [];
+    if (ib.approvals) parts.push(`${ib.approvals} ${ib.approvals === 1 ? 'change' : 'changes'} to approve`);
+    if (ib.repairs) parts.push(`${ib.repairs} open repair ${ib.repairs === 1 ? 'request' : 'requests'}${ib.down ? ` (${ib.down} down)` : ''}`);
+    el.innerHTML = parts.length ? `<a class="needs-ok-banner ${ib.down ? 'has-down' : ''}" href="#/notifications">
+      <span class="no-title">${ICONS.bell} Needs your OK</span><span class="no-body">${esc(parts.join(' · '))}</span><span class="no-go">Open ›</span></a>` : '';
+  }
+
   // ---------- list ----------
   async function renderList(t) {
-    setHeader(t.many, '#/');
+    setHeader(t.title || t.many, '#/');
     const st = searchState[t.key];
     app.innerHTML = `
       <a class="btn btn-primary btn-wide ${t.key}" href="#/${t.path}/new">${ICONS.plus}<span>Add ${t.one}</span></a>
       <div class="filters">
         ${searchBoxHTML('listSearch', 'Search ' + t.many.toLowerCase(), st.q)}
         <label class="loc-filter" id="locWrap" hidden>${ICONS.pin}<span class="sr-only">Location</span><select id="locFilter"></select></label>
+        ${t.key === 'equipment' ? `<label class="chip-toggle"><input type="checkbox" id="needsFilter" ${st.needs ? 'checked' : ''}><span>${ICONS.wrench} Needs repair only <b id="needsCount"></b></span></label>` : ''}
       </div>
       <div class="count-row"><p class="result-count" id="listCount">Loading...</p>
         <button type="button" class="btn btn-light btn-small" id="refreshBtn">${ICONS.refresh}<span>Refresh</span></button></div>
@@ -411,12 +436,13 @@
     let items = [];
     const list = app.querySelector('#list'), count = app.querySelector('#listCount'), sel = app.querySelector('#locFilter');
     function update() {
-      const found = items.filter(i => matches(i, st.q) && (!st.loc || (i.location || '').trim() === st.loc));
-      const filtered = st.q.trim() || st.loc;
+      const found = items.filter(i => matches(i, st.q) && (!st.loc || (i.location || '').trim() === st.loc) && (!st.needs || i.repairStatus));
+      const filtered = st.q.trim() || st.loc || st.needs;
+      const nc = app.querySelector('#needsCount'); if (nc) { const n = items.filter(i => i.repairStatus).length; nc.textContent = n ? `(${n})` : ''; }
       app.querySelector('#emptyMsg').hidden = items.length > 0;
       count.textContent = !items.length ? '' : filtered
         ? (found.length ? `Showing ${found.length} of ${items.length}` : 'Nothing found. Try a different word.')
-        : `${items.length} ${items.length === 1 ? t.one.toLowerCase() : t.many.toLowerCase()}`;
+        : `${items.length} ${items.length === 1 ? (t.countOne || t.one.toLowerCase()) : (t.countMany || t.many.toLowerCase())}`;
       list.innerHTML = found.map(i => cardHTML(i, false)).join('');
     }
     async function load() {
@@ -430,6 +456,7 @@
     }
     wireSearch(app, 'listSearch', q => { st.q = q; update(); });
     sel.addEventListener('change', () => { st.loc = sel.value; update(); });
+    const nf = app.querySelector('#needsFilter'); if (nf) nf.addEventListener('change', () => { st.needs = nf.checked; update(); });
     app.querySelector('#refreshBtn').addEventListener('click', e => withBusy(e.currentTarget, async () => {
       try { await load(); toast('Up to date'); } catch (ex) { toast(ex.message); }
     }));
@@ -444,6 +471,7 @@
 
   // ---------- detail ----------
   async function renderDetail(t, id) {
+    if (t.key === 'equipment') return renderEquipmentDetail(t, id);
     setHeader(t.one, '#/' + t.path);
     let item;
     try { item = await fetchItem(id); }
@@ -510,13 +538,13 @@
     const editing = !!item;
     setHeader(editing ? 'Edit ' + t.one : 'Add ' + t.one, editing ? `#/${t.path}/${encodeURIComponent(id)}` : '#/' + t.path);
     const data = { photoPreview: item ? item.photoUrl : '', newPhoto: null, removePhoto: false };
-    const v = item || { name: '', quantity: 1, location: '', description: '' };
+    const v = item || { name: '', quantity: 1, location: '', description: '', meterUnit: 'hours' };
     app.innerHTML = `
       <form class="form" id="itemForm" novalidate>
         <div class="field">
           <label for="f-name">Name <span class="req">(required)</span></label>
           <input id="f-name" type="text" maxlength="120" autocomplete="off" autocapitalize="sentences"
-            placeholder="${t.key === 'tool' ? 'e.g. Cordless drill' : 'e.g. 2x4 lumber 8 ft'}" value="${esc(v.name)}">
+            placeholder="${t.key === 'tool' ? 'e.g. Cordless drill' : t.key === 'equipment' ? 'e.g. CAT 305 mini excavator' : 'e.g. 2x4 lumber 8 ft'}" value="${esc(v.name)}">
           <p class="error" id="nameErr" hidden>Please type a name.</p>
         </div>
         <div class="field">
@@ -527,6 +555,11 @@
             <button type="button" class="qty-btn" data-step="1" aria-label="One more">+</button>
           </div>
         </div>
+        ${t.key === 'equipment' ? `<div class="field"><span class="label">Counts</span>
+          <div class="seg"><label><input type="radio" name="unit" value="hours" ${(v.meterUnit || 'hours') === 'hours' ? 'checked' : ''}><span>Hours</span></label>
+          <label><input type="radio" name="unit" value="miles" ${v.meterUnit === 'miles' ? 'checked' : ''}><span>Miles</span></label></div></div>
+          ${editing ? '' : `<div class="field"><label for="f-meter">Hours / miles now <span class="hint">optional</span></label>
+          <input id="f-meter" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 1250"></div>`}` : ''}
         <div class="field">
           <label for="f-loc">Location <span class="hint">Where is it?</span></label>
           <input id="f-loc" type="text" maxlength="120" list="locList" autocomplete="off" autocapitalize="sentences"
@@ -594,6 +627,10 @@
         type: t.key, name, quantity: isFinite(q) && q > 0 ? Math.round(q * 100) / 100 : 0,
         location: form.querySelector('#f-loc').value.trim(), description: form.querySelector('#f-desc').value.trim()
       };
+      if (t.key === 'equipment') {
+        body.meterUnit = form.querySelector('input[name=unit]:checked').value;
+        const fm = form.querySelector('#f-meter'); if (fm && fm.value !== '') body.meterValue = fm.value;
+      }
       if (data.newPhoto) { body.photo = data.newPhoto.photo; body.thumb = data.newPhoto.thumb; }
       else if (data.removePhoto) body.removePhoto = true;
       const saveErr = form.querySelector('#saveErr');
@@ -744,6 +781,472 @@
     });
   }
 
+  // ---------- equipment helpers ----------
+  function fmtMeter(v, unit) {
+    if (v === null || v === undefined || v === '') return '—';
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' ' + (unit === 'miles' ? 'miles' : 'hours');
+  }
+  function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+  function fmtDay(s) { if (!s) return ''; return new Date(s + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+  function fmtCost(c) { return c === null || c === undefined ? '' : '$' + Number(c).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  const URG = { can_wait: 'Can wait', soon: 'Soon', down: 'DOWN — not usable' };
+  const RSTAT = { open: 'Waiting', in_progress: 'In progress', done: 'Done', declined: 'Declined' };
+  function statusBadge(rs, big) {
+    if (!rs) return '';
+    const label = rs.level === 'down' ? 'DOWN — not usable' : rs.level === 'requested' ? 'Repair requested' : 'Repair in progress';
+    return `<span class="status-badge ${rs.level} ${big ? 'big' : ''}">${ICONS.wrench}${label}</span>`;
+  }
+  function thumbsHTML(photos) {
+    if (!photos || !photos.length) return '';
+    return `<div class="rec-photos">${photos.map(p => `<a href="${esc(p.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(p.thumbUrl)}" alt="Photo" loading="lazy"></a>`).join('')}</div>`;
+  }
+  // Pick up to `max` photos; returns controller with list + render
+  function photoListControl(root, max, existing) {
+    const state = { existing: (existing || []).slice(), added: [] };
+    const box = root.querySelector('.multi-photos'), input = root.querySelector('.multi-input'), status = root.querySelector('.multi-status');
+    function render() {
+      const all = state.existing.map((p, i) => ({ src: p.thumbUrl, k: 'e' + i })).concat(state.added.map((p, i) => ({ src: p.thumb, k: 'a' + i })));
+      box.innerHTML = all.map(p => `<div class="mp"><img src="${esc(p.src)}" alt="Photo"><button type="button" class="mp-x" data-k="${p.k}" aria-label="Remove photo">&times;</button></div>`).join('')
+        + (all.length < max ? `<label class="mp-add" for="${input.id}" role="button" tabindex="0">${ICONS.camera}<span>Add photo</span></label>` : '');
+    }
+    box.addEventListener('click', e => {
+      const x = e.target.closest('.mp-x'); if (!x) return;
+      const k = x.dataset.k; if (k[0] === 'e') state.existing.splice(Number(k.slice(1)), 1); else state.added.splice(Number(k.slice(1)), 1);
+      render();
+    });
+    box.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('mp-add')) { e.preventDefault(); input.click(); } });
+    input.addEventListener('change', async () => {
+      const f = input.files && input.files[0]; if (!f) return;
+      state.busy = true; status.textContent = 'Getting photo ready...';
+      try { state.added.push(await processPhoto(f)); status.textContent = ''; render(); }
+      catch (err) { status.textContent = err.message; } finally { state.busy = false; input.value = ''; }
+    });
+    render();
+    return state;
+  }
+
+  function repairCardHTML(r, opts) {
+    opts = opts || {};
+    const admin = opts.admin && (r.status === 'open' || r.status === 'in_progress');
+    return `<div class="repair-card urg-${r.urgency} st-${r.status}" data-repair="${esc(r.id)}">
+      ${opts.showItem ? `<a class="rc-item" href="#/equipment/${encodeURIComponent(r.itemId)}">${r.itemThumbUrl ? `<img src="${esc(r.itemThumbUrl)}" alt="">` : `<span class="rc-noimg">${ICONS.equipment}</span>`}<b>${esc(r.itemName)}</b></a>` : ''}
+      <div class="rc-tags"><span class="urg-tag ${r.urgency}">${URG[r.urgency]}</span><span class="rstat ${r.status}">${RSTAT[r.status]}</span></div>
+      <p class="rc-problem pre">${esc(r.problem)}</p>
+      ${r.photoUrl ? `<a href="${esc(r.photoUrl)}" target="_blank" rel="noopener"><img class="rc-photo" src="${esc(r.thumbUrl)}" alt="Photo of the problem"></a>` : ''}
+      <p class="muted small">Requested by ${esc(r.requestedByName)}, ${esc(fmtWhen(r.createdAt))}${r.meter != null ? ' · at ' + esc(fmtMeter(r.meter, r.meterUnit)) : ''}</p>
+      ${r.statusByName && r.status !== 'open' ? `<p class="rc-status">${RSTAT[r.status]} — ${esc(r.statusByName)}, ${esc(fmtWhen(r.updatedAt))}${r.statusNote ? `: “${esc(r.statusNote)}”` : ''}</p>` : ''}
+      ${admin ? `<label class="sr-only" for="rn-${esc(r.id)}">Note</label>
+        <input type="text" class="rc-note" id="rn-${esc(r.id)}" maxlength="500" placeholder="Note (needed to decline)">
+        <div class="three-btns">
+          ${r.status === 'open' ? `<button type="button" class="btn btn-light" data-rs="in_progress">In progress</button>` : ''}
+          <button type="button" class="btn btn-approve" data-rs="done">Done</button>
+          <button type="button" class="btn btn-light" data-rs="declined">Decline</button>
+        </div>${errorBox('rcErr-' + esc(r.id))}` : ''}
+    </div>`;
+  }
+  // Wire admin status buttons inside `root`. onDone(repair) after each change.
+  function wireRepairButtons(root, onChange) {
+    root.addEventListener('click', async e => {
+      const b = e.target.closest('[data-rs]'); if (!b) return;
+      const card = b.closest('[data-repair]'), id = card.dataset.repair, status = b.dataset.rs;
+      const note = card.querySelector('.rc-note').value.trim();
+      const err = card.querySelector('.error-box');
+      if (status === 'declined' && !note) { showError(err, 'Write a short note saying why, then tap Decline.'); card.querySelector('.rc-note').focus(); return; }
+      await withBusy(b, async () => {
+        try {
+          const r = await api('POST', `repairs/${encodeURIComponent(id)}/status`, { status, note });
+          toast(status === 'done' ? 'Marked done' : status === 'declined' ? 'Declined' : 'Marked in progress');
+          if (status === 'done' && await confirmBox('Repair done. Add it to the Maintenance & Repair Record now?', 'Yes, add record')) {
+            go(`#/equipment/${encodeURIComponent(r.repair.itemId)}/log/new?repair=${encodeURIComponent(id)}`); return;
+          }
+          await onChange(r.repair);
+        } catch (ex) { showError(err, ex.message); }
+      });
+    });
+  }
+
+  function auditLines(rec) {
+    return rec.audit.filter(a => a.action !== 'created').map(a => {
+      const when = fmtDay(new Date(a.at).toISOString().slice(0, 10)) === '' ? '' : new Date(a.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const what = a.details && a.details.changes && a.details.changes.length ? ': ' + esc(a.details.changes.join(', ')) : '';
+      if (a.action === 'changed') return a.approvedByName
+        ? `<li>Changed on ${when}, asked by ${esc(a.byName)}, <b>approved by ${esc(a.approvedByName)}</b>${what}</li>`
+        : `<li>Changed on ${when} by <b>${esc(a.byName)}</b> (admin)${what}</li>`;
+      if (a.action === 'change_denied') return `<li class="denied">Change asked by ${esc(a.byName)} on ${when} was <b>not approved</b> by ${esc(a.approvedByName)}${a.note ? `: “${esc(a.note)}”` : ''}</li>`;
+      if (a.action === 'deleted') return `<li>Deleted on ${when}${a.approvedByName ? `, approved by ${esc(a.approvedByName)}` : ` by ${esc(a.byName)}`}</li>`;
+      return '';
+    }).join('');
+  }
+  function recordHTML(rec, itemId) {
+    const lines = auditLines(rec);
+    const base = `#/equipment/${encodeURIComponent(itemId)}/log/${encodeURIComponent(rec.id)}`;
+    return `<li class="rec rec-${rec.kind}">
+      <div class="rec-head"><span class="kind-tag rk-${rec.kind}">${rec.kind === 'repair' ? 'Repair' : 'Maintenance'}</span>
+        <b>${esc(fmtDay(rec.doneDate))}</b>${rec.meter != null ? ` · ${esc(fmtMeter(rec.meter, rec.meterUnit))}` : ''}
+        <span class="locked" title="Locked">${ICONS.lock}</span></div>
+      <p class="rec-work pre">${esc(rec.work)}</p>
+      ${rec.performedBy || rec.cost != null ? `<p class="rec-meta">${rec.performedBy ? `Done by: <b>${esc(rec.performedBy)}</b>` : ''}${rec.performedBy && rec.cost != null ? ' · ' : ''}${rec.cost != null ? `Cost: <b>${esc(fmtCost(rec.cost))}</b>` : ''}</p>` : ''}
+      ${thumbsHTML(rec.photos)}
+      <p class="muted small">Logged by ${esc(rec.createdByName)}, ${esc(fmtWhen(rec.createdAt))}</p>
+      ${lines ? `<ul class="audit">${lines}</ul>` : ''}
+      ${rec.pending ? `<p class="pending-badge">⏳ Change waiting for approval <span>(${rec.pending.kind === 'delete' ? 'delete' : esc(rec.pending.changes.join(', '))} — asked by ${esc(rec.pending.requestedByName)})</span></p>` : ''}
+      <div class="rec-actions">
+        ${isAdmin()
+          ? `<a class="btn btn-light btn-small" href="${base}/edit">Edit</a><button type="button" class="btn btn-light btn-small" data-del-rec="${esc(rec.id)}">Delete</button>
+             ${rec.pending ? `<a class="btn btn-approve btn-small" href="#/notifications">Review request</a>` : ''}`
+          : (rec.pending ? '' : `<a class="btn btn-light btn-small" href="${base}/ask">Ask to change</a>`)}
+      </div>
+    </li>`;
+  }
+
+  async function renderEquipmentDetail(t, id) {
+    setHeader('Equipment', '#/equipment');
+    let item;
+    try { item = await fetchItem(id); }
+    catch (ex) { if (ex.status === 404) { itemCache.delete(id); app.innerHTML = notFound(t); return; } throw ex; }
+    if (item.type !== 'equipment') { app.innerHTML = notFound(t); return; }
+    let log = { readings: [], records: [], repairs: [] };
+    try { log = await api('GET', `equipment/${encodeURIComponent(id)}/log`); } catch (ex) { if (ex.status !== 0) throw ex; }
+    const unit = item.meterUnit === 'miles' ? 'miles' : 'hours';
+    const open = log.repairs.filter(r => r.status === 'open' || r.status === 'in_progress');
+    const closed = log.repairs.filter(r => !(r.status === 'open' || r.status === 'in_progress'));
+    const base = `#/equipment/${encodeURIComponent(item.id)}`;
+    app.innerHTML = `
+      <article class="detail eq-detail">
+        ${item.photoUrl ? `<img class="detail-photo" src="${esc(item.photoUrl)}" alt="Photo of ${esc(item.name)}">` :
+          `<div class="detail-photo photo-empty equipment">${ICONS.equipment}<span>No photo</span></div>`}
+        <div class="detail-info">
+          <h2 class="detail-name">${esc(item.name)}</h2>
+          ${statusBadge(item.repairStatus, true)}
+          <p class="updated">${item.updatedByName ? `Updated by <b>${esc(item.updatedByName)}</b>, ${esc(fmtWhen(item.updatedAt))}` : ''}</p>
+          <section class="meter-box">
+            <div class="field-label">${ICONS.gauge} ${unit === 'miles' ? 'Miles' : 'Hours'}</div>
+            <div class="meter-big">${item.meterValue != null ? Number(item.meterValue).toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'} <span>${unit}</span></div>
+            <p class="muted">${item.meterUpdatedAt ? `Last updated ${esc(fmtWhen(item.meterUpdatedAt))} by ${esc(item.meterUpdatedByName)}` : 'Not entered yet'}</p>
+            <a class="btn btn-primary equipment btn-wide" href="${base}/meter">${ICONS.gauge}<span>Update ${unit}</span></a>
+            ${log.readings.length ? `<details class="history"><summary>History (${log.readings.length})</summary><ul>
+              ${log.readings.map(r => `<li><b>${esc(fmtMeter(r.value, r.unit))}</b> — ${esc(r.byName)}, ${esc(fmtWhen(r.at))}${r.lower ? ' <span class="warn-tag">Lower than before</span>' : ''}</li>`).join('')}</ul></details>` : ''}
+          </section>
+          <a class="btn btn-repair btn-wide" href="${base}/repair">${ICONS.wrench}<span>Request a repair</span></a>
+          ${open.length ? `<section class="repairs-open"><h3>Repair requests</h3>${open.map(r => repairCardHTML(r, { admin: isAdmin() })).join('')}</section>` : ''}
+          <div class="field-label">Quantity</div>
+          <div class="qty-row">
+            <button type="button" class="qty-btn" data-step="-1" aria-label="One less">&minus;</button>
+            <output class="qty-big" id="qtyOut">${fmtQty(item.quantity)}</output>
+            <button type="button" class="qty-btn" data-step="1" aria-label="One more">+</button>
+          </div>
+          <div class="field-label">Location</div>
+          <p class="detail-text">${item.location ? esc(item.location) : '<span class="muted">Not set</span>'}</p>
+          <div class="field-label">Description</div>
+          <p class="detail-text pre">${item.description ? esc(item.description) : '<span class="muted">None</span>'}</p>
+        </div>
+      </article>
+      <section class="panel log-panel">
+        <h2>${ICONS.wrench} Maintenance &amp; Repair Record</h2>
+        <a class="btn btn-primary equipment btn-wide" href="${base}/log/new">${ICONS.plus}<span>Add maintenance or repair</span></a>
+        ${log.records.length ? `<ul class="rec-list">${log.records.map(r => recordHTML(r, item.id)).join('')}</ul>`
+          : '<p class="muted mt">Nothing logged yet.</p>'}
+        ${!isAdmin() && log.records.length ? `<p class="hint">${ICONS.lock} Saved entries are locked. Use “Ask to change” and the boss will approve it.</p>` : ''}
+      </section>
+      ${closed.length ? `<details class="panel"><summary class="sum-big">Past repair requests (${closed.length})</summary>${closed.map(r => repairCardHTML(r)).join('')}</details>` : ''}
+      <div class="action-row">
+        <a class="btn btn-primary equipment" href="${base}/edit">Edit</a>
+        <button type="button" class="btn btn-danger" id="delBtn">Delete</button>
+      </div>`;
+    const out = app.querySelector('#qtyOut');
+    app.querySelectorAll('.qty-btn').forEach(b => b.addEventListener('click', async () => {
+      try { const r = await api('POST', `items/${encodeURIComponent(item.id)}/adjust`, { delta: Number(b.dataset.step) }); item = r.item; out.textContent = fmtQty(item.quantity); toast('Quantity saved: ' + fmtQty(item.quantity)); }
+      catch (ex) { toast(ex.message); }
+    }));
+    wireRepairButtons(app, () => renderEquipmentDetail(t, id));
+    app.querySelectorAll('[data-del-rec]').forEach(b => b.addEventListener('click', async () => {
+      if (!(await confirmBox('Delete this record entry? It stays in the history as deleted.', 'Delete'))) return;
+      try { await api('DELETE', 'records/' + encodeURIComponent(b.dataset.delRec)); toast('Entry deleted'); renderEquipmentDetail(t, id); } catch (ex) { toast(ex.message); }
+    }));
+    app.querySelector('#delBtn').addEventListener('click', async () => {
+      if (!(await confirmBox(`Delete "${item.name}"? The boss will be told, and can bring it back if it was a mistake.`, 'Delete'))) return;
+      try { await api('DELETE', 'items/' + encodeURIComponent(item.id)); itemCache.delete(item.id); toast('Deleted'); go('#/equipment'); }
+      catch (ex) { alert(ex.message); }
+    });
+    pageRefresh = async () => { if (document.getElementById('modal').hidden && !app.querySelector('.rc-note:focus')) await renderEquipmentDetail(t, id); };
+  }
+
+  async function loadEquipment(id) {
+    const item = await fetchItem(id);
+    if (item.type !== 'equipment') throw new ApiError('That machine was not found.', 404);
+    return item;
+  }
+
+  async function renderMeter(id) {
+    const item = await loadEquipment(id);
+    const unit = item.meterUnit === 'miles' ? 'miles' : 'hours';
+    setHeader('Update ' + unit, `#/equipment/${encodeURIComponent(id)}`);
+    app.innerHTML = `
+      <form class="form" id="meterForm" novalidate>
+        <h2 class="center">${esc(item.name)}</h2>
+        <p class="center muted">Last reading: <b>${esc(fmtMeter(item.meterValue, unit))}</b>${item.meterUpdatedAt ? ` (${esc(fmtWhen(item.meterUpdatedAt))}, ${esc(item.meterUpdatedByName)})` : ''}</p>
+        <label for="m-val" class="big-label-text">What does the ${unit === 'miles' ? 'odometer' : 'hour meter'} say now?</label>
+        <input id="m-val" class="huge-input" type="number" inputmode="decimal" min="0" step="any" value="${item.meterValue != null ? esc(item.meterValue) : ''}" placeholder="0">
+        <p class="center unit-word">${unit}</p>
+        ${errorBox('meterErr')}
+        <button type="submit" class="btn btn-primary equipment btn-wide" id="meterBtn">Save ${unit}</button>
+      </form>`;
+    const f = app.querySelector('#meterForm'), inp = f.querySelector('#m-val');
+    setTimeout(() => { inp.focus(); inp.select(); }, 60);
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      const v = parseFloat(inp.value);
+      if (!isFinite(v) || v < 0) return showError(f.querySelector('#meterErr'), `Type the ${unit} as a number.`);
+      if (item.meterValue != null && v < item.meterValue &&
+        !(await confirmBox(`${fmtMeter(v, unit)} is LOWER than the last reading (${fmtMeter(item.meterValue, unit)}). Save anyway? The boss will be told.`, 'Save anyway'))) return;
+      withBusy(f.querySelector('#meterBtn'), async () => {
+        try {
+          const r = await api('POST', `items/${encodeURIComponent(id)}/meter`, { value: v });
+          itemCache.set(r.item.id, r.item);
+          toast(r.lower ? 'Saved (lower than before — the boss was told)' : `Saved: ${fmtMeter(v, unit)}`);
+          go(`#/equipment/${encodeURIComponent(id)}`);
+        } catch (ex) { showError(f.querySelector('#meterErr'), ex.message); }
+      });
+    });
+  }
+
+  // mode: 'new' | 'edit' (admin, direct) | 'ask' (request a change)
+  async function renderRecordForm(id, recId, mode, query) {
+    const item = await loadEquipment(id);
+    const unit = item.meterUnit === 'miles' ? 'miles' : 'hours';
+    let rec = null, repair = null;
+    if (recId) rec = (await api('GET', 'records/' + encodeURIComponent(recId))).record;
+    if (mode === 'new' && query.repair) {
+      try { repair = (await api('GET', `equipment/${encodeURIComponent(id)}/log`)).repairs.find(r => r.id === query.repair) || null; } catch (e) { /* ignore */ }
+    }
+    if (mode === 'ask' && rec && rec.pending) { toast('A change is already waiting for approval'); go(`#/equipment/${encodeURIComponent(id)}`); return; }
+    const v = rec || { kind: repair ? 'repair' : 'maintenance', doneDate: todayStr(), meter: repair && repair.meter != null ? repair.meter : item.meterValue, work: repair ? 'Fixed: ' + repair.problem : '', performedBy: '', cost: null };
+    const back = `#/equipment/${encodeURIComponent(id)}`;
+    setHeader(mode === 'ask' ? 'Ask to change' : mode === 'edit' ? 'Edit record' : 'Add record', back);
+    app.innerHTML = `
+      <form class="form" id="recForm" novalidate>
+        <p class="form-for">${ICONS.equipment}<b>${esc(item.name)}</b></p>
+        ${mode === 'ask' ? `<p class="ask-intro">${ICONS.lock} This entry is locked. Change what is wrong below and say why. <b>The boss has to approve it</b> before it changes.</p>
+          <label class="switch-row"><input type="checkbox" id="askDelete"><span class="switch" aria-hidden="true"></span><span>Ask to delete this entry instead</span></label>` : ''}
+        ${repair ? `<p class="ok-box">Adding the record for repair request: “${esc(repair.problem)}”</p>` : ''}
+        <div id="recFields">
+          <div class="field"><span class="label">Type</span>
+            <div class="seg"><label><input type="radio" name="kind" value="maintenance" ${v.kind === 'maintenance' ? 'checked' : ''}><span>Maintenance</span></label>
+            <label><input type="radio" name="kind" value="repair" ${v.kind === 'repair' ? 'checked' : ''}><span>Repair</span></label></div></div>
+          <div class="field"><label for="r-date">Date done</label><input id="r-date" type="date" max="${todayStr()}" value="${esc(v.doneDate)}"></div>
+          <div class="field"><label for="r-meter">${unit === 'miles' ? 'Miles' : 'Hours'} at the time <span class="hint">optional</span></label>
+            <input id="r-meter" type="number" inputmode="decimal" min="0" step="any" value="${v.meter != null ? esc(v.meter) : ''}"></div>
+          <div class="field"><label for="r-work">What was done <span class="req">(required)</span></label>
+            <textarea id="r-work" rows="4" maxlength="2000" placeholder="e.g. Changed engine oil and filters, greased all points">${esc(v.work)}</textarea></div>
+          <div class="field"><label for="r-by">Who did it / shop <span class="hint">optional</span></label>
+            <input id="r-by" type="text" maxlength="120" placeholder="e.g. Mike, or Joe's Diesel Repair" value="${esc(v.performedBy || '')}"></div>
+          <div class="field"><label for="r-cost">Cost <span class="hint">optional</span></label>
+            <div class="money"><span>$</span><input id="r-cost" type="text" inputmode="decimal" maxlength="14" placeholder="0.00" value="${v.cost != null ? esc(Number(v.cost).toFixed(2)) : ''}"></div></div>
+          ${mode === 'ask' ? (rec.photos.length ? `<div class="field"><span class="label">Photos</span>${thumbsHTML(rec.photos)}<p class="hint">Photos can only be changed by an admin.</p></div>` : '')
+            : `<div class="field"><span class="label">Photos / receipt <span class="hint">optional, up to 4</span></span>
+              <div class="multi-photos"></div><input type="file" id="r-photo" class="multi-input sr-only" accept="image/*" capture="environment" tabindex="-1">
+              <p class="hint multi-status" aria-live="polite"></p></div>`}
+        </div>
+        ${mode === 'ask' ? `<div class="field"><label for="r-reason">Why? <span class="req">(required)</span></label>
+          <textarea id="r-reason" rows="2" maxlength="500" placeholder="e.g. I typed the wrong hours"></textarea></div>` : ''}
+        ${mode !== 'ask' ? `<p class="hint">${ICONS.lock} After saving, this entry is locked.${isAdmin() ? ' (Admins can still edit; changes are recorded.)' : ' To fix a mistake later, use “Ask to change”.'}</p>` : ''}
+        ${errorBox('recErr')}
+        <div class="action-row sticky-actions">
+          <a class="btn btn-light" href="${back}">Cancel</a>
+          <button type="submit" class="btn btn-primary equipment" id="recBtn">${mode === 'ask' ? 'Send for approval' : 'Save'}</button>
+        </div>
+      </form>`;
+    const f = app.querySelector('#recForm');
+    const photos = mode === 'ask' ? null : photoListControl(f, 4, rec ? rec.photos : []);
+    const askDel = f.querySelector('#askDelete');
+    if (askDel) askDel.addEventListener('change', () => { f.querySelector('#recFields').hidden = askDel.checked; f.querySelector('#recBtn').textContent = askDel.checked ? 'Ask to delete' : 'Send for approval'; });
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      if (photos && photos.busy) { toast('Wait a moment, photo is still loading'); return; }
+      const err = f.querySelector('#recErr');
+      const fields = {
+        kind: f.querySelector('input[name=kind]:checked').value, doneDate: f.querySelector('#r-date').value,
+        meter: f.querySelector('#r-meter').value, work: f.querySelector('#r-work').value.trim(),
+        performedBy: f.querySelector('#r-by').value.trim(), cost: f.querySelector('#r-cost').value.trim()
+      };
+      const deleting = askDel && askDel.checked;
+      if (!deleting && !fields.work) return showError(err, 'Please write what was done.');
+      if (!deleting && !fields.doneDate) return showError(err, 'Please pick the date it was done.');
+      withBusy(f.querySelector('#recBtn'), async () => {
+        try {
+          if (mode === 'new') {
+            await api('POST', `items/${encodeURIComponent(id)}/records`, { ...fields, photos: photos.added, repairRequestId: repair ? repair.id : undefined });
+            toast('Saved to the record');
+          } else if (mode === 'edit') {
+            await api('PUT', 'records/' + encodeURIComponent(recId), { ...fields, keepPhotos: photos.existing.map(p => p.photoUrl), newPhotos: photos.added });
+            toast('Record changed');
+          } else {
+            const reason = f.querySelector('#r-reason').value.trim();
+            if (!reason) { showError(err, 'Please say why it should change.'); return; }
+            await api('POST', `records/${encodeURIComponent(recId)}/change-requests`, deleting ? { kind: 'delete', reason } : { kind: 'edit', proposed: fields, reason });
+            toast('Sent to the boss for approval');
+          }
+          go(back);
+        } catch (ex) { showError(err, ex.message); }
+      });
+    });
+  }
+
+  async function renderRepairForm(id) {
+    const item = await loadEquipment(id);
+    const unit = item.meterUnit === 'miles' ? 'miles' : 'hours';
+    const back = `#/equipment/${encodeURIComponent(id)}`;
+    setHeader('Repair request', back);
+    const data = { photo: null };
+    app.innerHTML = `
+      <form class="form" id="repForm" novalidate>
+        <p class="form-for">${ICONS.equipment}<b>${esc(item.name)}</b></p>
+        <div class="field"><label for="p-what">What's wrong? <span class="req">(required)</span></label>
+          <textarea id="p-what" rows="4" maxlength="2000" placeholder="e.g. Hydraulic hose leaking on the boom"></textarea></div>
+        <div class="field"><span class="label">How urgent?</span>
+          <div class="urgency">
+            <label><input type="radio" name="urg" value="can_wait"><span class="u-can_wait">Can wait</span></label>
+            <label><input type="radio" name="urg" value="soon"><span class="u-soon">Soon</span></label>
+            <label><input type="radio" name="urg" value="down"><span class="u-down">DOWN — not usable</span></label>
+          </div></div>
+        <div class="field"><span class="label">Photo <span class="hint">optional</span></span>
+          <div class="photo-box" id="pPhotoBox"></div>
+          <input id="p-photo" type="file" accept="image/*" capture="environment" class="sr-only" tabindex="-1">
+          <label for="p-photo" class="btn btn-light btn-wide mt" role="button" tabindex="0">${ICONS.camera}<span id="pPhotoText">Take or choose photo</span></label>
+          <p class="hint" id="pPhotoStatus" aria-live="polite"></p></div>
+        <div class="field"><label for="p-meter">${unit === 'miles' ? 'Miles' : 'Hours'} now <span class="hint">optional</span></label>
+          <input id="p-meter" type="number" inputmode="decimal" min="0" step="any" value="${item.meterValue != null ? esc(item.meterValue) : ''}"></div>
+        ${errorBox('repErr')}
+        <div class="action-row sticky-actions">
+          <a class="btn btn-light" href="${back}">Cancel</a>
+          <button type="submit" class="btn btn-repair" id="repBtn">Send request</button>
+        </div>
+      </form>`;
+    const f = app.querySelector('#repForm');
+    const box = f.querySelector('#pPhotoBox'), inp = f.querySelector('#p-photo'), st = f.querySelector('#pPhotoStatus');
+    function show() { box.innerHTML = data.photo ? `<img src="${data.photo.photo}" alt="Photo preview">` : `<div class="photo-empty equipment">${ICONS.camera}<span>No photo</span></div>`; f.querySelector('#pPhotoText').textContent = data.photo ? 'Change photo' : 'Take or choose photo'; }
+    show();
+    let busy = false;
+    inp.addEventListener('change', async () => {
+      const file = inp.files && inp.files[0]; if (!file) return;
+      busy = true; st.textContent = 'Getting photo ready...';
+      try { data.photo = await processPhoto(file); st.textContent = ''; show(); } catch (ex) { st.textContent = ex.message; } finally { busy = false; inp.value = ''; }
+    });
+    f.addEventListener('submit', e => {
+      e.preventDefault();
+      if (busy) { toast('Wait a moment, photo is still loading'); return; }
+      const err = f.querySelector('#repErr');
+      const problem = f.querySelector('#p-what').value.trim(), urg = f.querySelector('input[name=urg]:checked');
+      if (!problem) return showError(err, "Please write what's wrong.");
+      if (!urg) return showError(err, 'Please pick how urgent it is.');
+      withBusy(f.querySelector('#repBtn'), async () => {
+        try {
+          const body = { problem, urgency: urg.value, meter: f.querySelector('#p-meter').value };
+          if (data.photo) { body.photo = data.photo.photo; body.thumb = data.photo.thumb; }
+          const r = await api('POST', `items/${encodeURIComponent(id)}/repairs`, body);
+          itemCache.set(r.item.id, r.item);
+          toast('Repair request sent to the boss'); go(back);
+        } catch (ex) { showError(err, ex.message); }
+      });
+    });
+  }
+
+  // ---------- approvals ("Needs your OK") ----------
+  const FIELD_ROWS = [['kind', 'Type'], ['doneDate', 'Date'], ['meter', 'Hours/miles'], ['work', 'What was done'], ['performedBy', 'Done by'], ['cost', 'Cost']];
+  function fieldVal(k, v, unit) {
+    if (v === null || v === undefined || v === '') return '<span class="muted">(none)</span>';
+    if (k === 'kind') return v === 'repair' ? 'Repair' : 'Maintenance';
+    if (k === 'doneDate') return esc(fmtDay(v));
+    if (k === 'meter') return esc(fmtMeter(v, unit));
+    if (k === 'cost') return esc(fmtCost(v));
+    return esc(v);
+  }
+  function approvalCardHTML(c) {
+    const unit = c.old.meterUnit;
+    let table;
+    if (c.kind === 'delete') {
+      table = `<p class="del-ask">Asks to <b>DELETE</b> this entry:</p><div class="del-list">${FIELD_ROWS.map(([k, l]) => `<p><b>${l}:</b> ${fieldVal(k, c.old[k], unit)}</p>`).join('')}</div>`;
+    } else {
+      const ch = FIELD_ROWS.filter(([k]) => (c.old[k] ?? null) !== (c.proposed[k] ?? null));
+      const same = FIELD_ROWS.filter(([k]) => (c.old[k] ?? null) === (c.proposed[k] ?? null));
+      table = ch.map(([k, l]) => `<div class="chg"><div class="chg-name">${l}</div><div class="chg-cols">
+          <div class="chg-old"><small>Now</small>${fieldVal(k, c.old[k], unit)}</div>
+          <div class="chg-new"><small>Change to</small>${fieldVal(k, c.proposed[k], unit)}</div></div></div>`).join('')
+        + (same.length ? `<p class="chg-same">Not changing: ${same.map(([k, l]) => `${l} (${fieldVal(k, c.old[k], unit)})`).join(', ')}</p>` : '');
+    }
+    return `<div class="approval-card" data-cr="${esc(c.id)}">
+      <div class="rc-tags"><span class="kind-tag kind-approval">Approval needed</span></div>
+      <p class="ap-text"><b>${esc(c.requestedByName)}</b> asks to ${c.kind === 'delete' ? '<b>delete</b>' : '<b>change</b>'} a record on
+        <a href="#/equipment/${encodeURIComponent(c.itemId)}"><b>${esc(c.itemName)}</b></a></p>
+      <p class="reason">Why: “${esc(c.reason)}”</p>
+      ${table}
+      <p class="muted small">Asked ${esc(fmtWhen(c.createdAt))}</p>
+      <label class="sr-only" for="dn-${esc(c.id)}">Note</label>
+      <input type="text" class="ap-note" id="dn-${esc(c.id)}" maxlength="500" placeholder="Note to ${esc(firstName(c.requestedByName))} (optional)">
+      <div class="two-btns"><button type="button" class="btn btn-approve" data-decide="1">✓ Approve</button>
+        <button type="button" class="btn btn-danger" data-decide="0">✕ Deny</button></div>
+      ${errorBox('apErr-' + esc(c.id))}
+    </div>`;
+  }
+  async function renderNeedsOk(el, onChange) {
+    const ib = await api('GET', 'inbox');
+    S.inbox = ib.counts;
+    if (!ib.approvals.length && !ib.repairs.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<section class="needs-ok">
+      <h2>${ICONS.bell} Needs your OK</h2>
+      ${ib.approvals.map(approvalCardHTML).join('')}
+      ${ib.repairs.map(r => repairCardHTML(r, { admin: true, showItem: true })).join('')}
+    </section>`;
+    el.querySelectorAll('[data-decide]').forEach(b => b.addEventListener('click', async () => {
+      const card = b.closest('[data-cr]'), approve = b.dataset.decide === '1';
+      const note = card.querySelector('.ap-note').value.trim();
+      if (!approve && !(await confirmBox('Deny this change? Nothing will change, and they will be told.', 'Deny'))) return;
+      await withBusy(b, async () => {
+        try {
+          await api('POST', `change-requests/${encodeURIComponent(card.dataset.cr)}/decide`, { approve, note });
+          toast(approve ? 'Approved — the record was changed' : 'Denied');
+          await onChange();
+        } catch (ex) { showError(card.querySelector('.error-box'), ex.message); }
+      });
+    }));
+    wireRepairButtons(el, onChange);
+  }
+
+  // ---------- my requests (everyone) ----------
+  async function renderMyRequests() {
+    setHeader('My requests', '#/');
+    const [mine, notes] = await Promise.all([api('GET', 'my/requests'), api('GET', 'notifications?limit=30')]);
+    const updates = notes.items.filter(n => n.forMe);
+    const crStatus = c => c.status === 'pending' ? '<span class="rstat open">Waiting for approval</span>'
+      : c.status === 'approved' ? `<span class="rstat done">Approved by ${esc(c.decidedByName)}</span>` : `<span class="rstat declined">Not approved — ${esc(c.decidedByName)}</span>`;
+    const fresh = updates.filter(n => !n.read), older = updates.filter(n => n.read);
+    app.innerHTML = `
+      ${isAdmin() ? '<a class="btn btn-light btn-small mb" href="#/notifications">‹ Back to Notifications</a>' : ''}
+      ${fresh.length ? `<section class="panel"><h2>New for you</h2><ul class="notif-list">${fresh.map(notifHTML).join('')}</ul></section>` : ''}
+      <section class="panel">
+        <h2>${ICONS.wrench} My repair requests</h2>
+        ${mine.repairs.length ? mine.repairs.map(r => repairCardHTML(r, { showItem: true })).join('') : '<p class="muted">None yet. Use “Request a repair” on a machine.</p>'}
+      </section>
+      <section class="panel">
+        <h2>${ICONS.lock} My change requests</h2>
+        ${mine.changeRequests.length ? mine.changeRequests.map(c => `<div class="cr-card">
+            <a href="#/equipment/${encodeURIComponent(c.itemId)}"><b>${esc(c.itemName)}</b></a>
+            <div class="rc-tags">${crStatus(c)}</div>
+            <p>${c.kind === 'delete' ? 'Asked to <b>delete</b> an entry' : 'Asked to change: ' + esc(c.changes.join(', '))}</p>
+            <p class="muted small">Why: “${esc(c.reason)}” · ${esc(fmtWhen(c.createdAt))}</p>
+            ${c.decisionNote ? `<p class="rc-status">Note: “${esc(c.decisionNote)}”</p>` : ''}
+          </div>`).join('') : '<p class="muted">None yet. Use “Ask to change” on a locked record entry.</p>'}
+      </section>
+      ${older.length ? `<details class="panel older-updates"><summary>Earlier updates (${older.length})</summary><ul class="notif-list">${older.map(notifHTML).join('')}</ul></details>` : ''}`;
+    const unreadIds = updates.filter(n => !n.read).map(n => n.id);
+    if (unreadIds.length) api('POST', 'notifications/read', { ids: unreadIds }).then(r => setBadge(r.unread)).catch(() => {});
+    app.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
+      const n = updates.find(x => String(x.id) === b.dataset.open);
+      if (n && n.itemExists && !n.itemDeleted) go(`#/${(TYPES[n.itemType] || TYPES.material).path}/${encodeURIComponent(n.itemId)}`);
+    }));
+    pageRefresh = async () => { await renderMyRequests(); };
+  }
+
   // ---------- push notifications on this device ----------
   function isIOS() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
   function isStandalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
@@ -800,7 +1303,7 @@
     if (st === 'on') body = `<p class="ok-line">Notifications are <b>ON</b> for this device.</p>
         <div class="two-btns"><button type="button" class="btn btn-light" id="pushTest">Send a test</button>
         <button type="button" class="btn btn-light" id="pushOff">Turn off</button></div>`;
-    else if (st === 'off') body = `<p>Get an alert on this device when someone adds or deletes an item.</p>
+    else if (st === 'off') body = `<p>Get an alert on this device when a change needs your OK, a repair is requested, or someone adds or deletes an item.</p>
         <button type="button" class="btn btn-primary btn-wide" id="pushOn">${ICONS.bell}<span>Turn on notifications on this device</span></button>
         ${opts.promptOnly ? '<button type="button" class="btn btn-light btn-wide mt" id="pushLater">Not now</button>' : ''}
         ${isIOS() ? '<p class="hint mt">iPhone: works only from the Home Screen app (iOS 16.4+).</p>' : ''}`;
@@ -829,24 +1332,56 @@
   }
 
   // ---------- notifications (admins) ----------
+  const KIND_LABEL = { add: 'Added', delete: 'Deleted', restore: 'Restored', edit: 'Edited', qty: 'Quantity',
+    approval: 'Approval needed', repair: 'Repair request', meter_low: 'Meter lower than before', record: 'Record added',
+    record_edit: 'Record changed', request_result: 'Answer', repair_status: 'Repair update' };
+  const NEW_KINDS = ['approval', 'repair', 'meter_low', 'record', 'record_edit', 'request_result', 'repair_status'];
   function notifHTML(n) {
     const t = TYPES[n.itemType] || TYPES.material;
-    const sn = n.snapshot || {};
+    const sn = n.snapshot || {}, d = n.details || {};
     const verbs = { add: 'added', delete: 'deleted', restore: 'restored', edit: 'changed', qty: 'changed the quantity of' };
     const thumb = n.thumbUrl ? `<img class="thumb" src="${esc(n.thumbUrl)}" alt="" loading="lazy">`
       : `<div class="thumb thumb-empty ${t.key}" aria-hidden="true">${ICONS[t.key]}</div>`;
-    let line2 = '';
-    if (n.kind === 'qty') line2 = `Qty ${fmtQty(n.details.from)} → <b>${fmtQty(n.details.to)}</b>`;
-    else if (n.kind === 'edit') line2 = esc((n.details.changes || []).join(', '));
-    else line2 = `Qty ${fmtQty(sn.quantity)}${sn.location ? ' — ' + esc(sn.location) : ''}`;
+    let text, line2 = '', tagCls = n.kind;
+    const who = `<b>${esc(n.mine ? 'You' : n.actorName)}</b>`, name = `<b>${esc(sn.name)}</b>`;
+    if (!NEW_KINDS.includes(n.kind)) {
+      text = `${who} ${verbs[n.kind]} ${name}`;
+      if (n.kind === 'qty') line2 = `Qty ${fmtQty(d.from)} → <b>${fmtQty(d.to)}</b>`;
+      else if (n.kind === 'edit') line2 = esc((d.changes || []).join(', '));
+      else line2 = `Qty ${fmtQty(sn.quantity)}${sn.location ? ' — ' + esc(sn.location) : ''}`;
+    } else if (n.kind === 'approval') {
+      text = `${who} asks to ${d.kind === 'delete' ? 'delete' : 'change'} a record on ${name}`;
+      line2 = `${d.kind === 'delete' ? '' : esc((d.changes || []).join(', ')) + ' — '}“${esc(d.reason || '')}”`;
+      if (n.refStatus && n.refStatus.status !== 'pending') line2 += `<br><b>${n.refStatus.status === 'approved' ? 'Approved' : 'Denied'} by ${esc(n.refStatus.by)}</b>`;
+      else line2 += '<br><b class="waiting">Waiting for your OK</b>';
+    } else if (n.kind === 'repair') {
+      text = `${who} requested a repair on ${name}`;
+      line2 = `<span class="urg-tag ${esc(d.urgency)}">${URG[d.urgency] || ''}</span> ${esc(d.problem || '')}`;
+      if (n.refStatus) line2 += `<br><b>Now: ${RSTAT[n.refStatus.status] || ''}</b>`;
+    } else if (n.kind === 'meter_low') {
+      text = `${who} entered a LOWER reading on ${name}`;
+      line2 = `${esc(fmtMeter(d.from, d.unit))} → <b>${esc(fmtMeter(d.to, d.unit))}</b>`;
+    } else if (n.kind === 'record') {
+      text = `${who} logged ${d.kind === 'repair' ? 'a repair' : 'maintenance'} on ${name}`; line2 = esc(d.work || '');
+    } else if (n.kind === 'record_edit') {
+      text = `${who} edited a record on ${name}`; line2 = esc((d.changes || []).join(', '));
+    } else if (n.kind === 'request_result') {
+      tagCls = d.approved ? 'request_ok' : 'request_no';
+      text = `${who} <b>${d.approved ? 'approved' : 'did not approve'}</b> your ${d.kind === 'delete' ? 'delete' : 'change'} request on ${name}`;
+      line2 = d.note ? `“${esc(d.note)}”` : '';
+    } else if (n.kind === 'repair_status') {
+      text = `${who} marked your repair request on ${name}: <b>${RSTAT[d.status] || ''}</b>`;
+      line2 = esc(d.problem || '') + (d.note ? ` — “${esc(d.note)}”` : '');
+    }
+    const label = n.kind === 'request_result' ? (d.approved ? 'Approved' : 'Not approved') : KIND_LABEL[n.kind] || n.kind;
     const del = n.kind === 'delete';
     return `<li class="notif ${n.read ? '' : 'unread'} kind-${n.kind}" data-id="${n.id}">
       <button type="button" class="notif-main" data-open="${n.id}">
         ${thumb}
         <span class="notif-body">
-          <span class="notif-top"><span class="kind-tag kind-${n.kind}">${{ add: 'Added', delete: 'Deleted', restore: 'Restored', edit: 'Edited', qty: 'Quantity' }[n.kind]}</span>
+          <span class="notif-top"><span class="kind-tag kind-${tagCls}">${label}</span>
             ${n.read ? '' : '<span class="new-dot">New</span>'}</span>
-          <span class="notif-text"><b>${esc(n.mine ? 'You' : n.actorName)}</b> ${verbs[n.kind]} <b>${esc(sn.name)}</b></span>
+          <span class="notif-text">${text}</span>
           <span class="notif-line">${line2}</span>
           <span class="notif-when">${esc(fmtWhen(n.createdAt))}</span>
         </span>
@@ -862,11 +1397,20 @@
   async function renderNotifications() {
     setHeader('Notifications', '#/');
     app.innerHTML = `
+      <div id="needsOk"></div>
       <div id="pushCard"></div>
+      <a class="btn btn-light btn-wide mb" href="#/requests">My requests</a>
       <div class="notif-tools">
         <div class="seg" role="group" aria-label="Show">
-          <label><input type="radio" name="nf" value="key"><span>Adds &amp; deletes</span></label>
+          <label><input type="radio" name="nf" value="key"><span>Important</span></label>
           <label><input type="radio" name="nf" value="all"><span>Everything</span></label>
+        </div>
+        <div class="chips" role="group" aria-label="Type">
+          <button type="button" class="chip on" data-kf="">All</button>
+          <button type="button" class="chip" data-kf="approval">Approvals</button>
+          <button type="button" class="chip" data-kf="repair">Repairs</button>
+          <button type="button" class="chip" data-kf="meter">Meter</button>
+          <button type="button" class="chip" data-kf="items">Items</button>
         </div>
         <div class="count-row"><p class="result-count" id="unreadLine"></p>
           <button type="button" class="btn btn-light btn-small" id="markAll">Mark all read</button></div>
@@ -874,13 +1418,21 @@
       <ul class="notif-list" id="notifList"><li class="muted">Loading...</li></ul>
       <button type="button" class="btn btn-light btn-wide mt" id="moreBtn" hidden>Show older</button>`;
     renderPushCard(app.querySelector('#pushCard')).catch(() => {});
-    let list = [];
+    const okEl = app.querySelector('#needsOk');
+    const reloadOk = async () => { await renderNeedsOk(okEl, reloadAll); };
+    const reloadAll = async () => { await Promise.all([reloadOk(), load(false)]); };
+    let list = [], kf = '';
+    const KF = { approval: ['approval', 'request_result'], repair: ['repair', 'repair_status', 'record', 'record_edit'], meter: ['meter_low'], items: ['add', 'delete', 'restore', 'edit', 'qty'] };
+    app.querySelectorAll('[data-kf]').forEach(b => b.addEventListener('click', () => {
+      kf = b.dataset.kf; app.querySelectorAll('[data-kf]').forEach(x => x.classList.toggle('on', x === b)); paint(S.unread);
+    }));
     const ul = app.querySelector('#notifList'), more = app.querySelector('#moreBtn');
     function paint(unread) {
       setBadge(unread);
       app.querySelector('#unreadLine').textContent = unread ? `${unread} new` : 'All caught up';
       app.querySelector('#markAll').hidden = !unread;
-      ul.innerHTML = list.length ? list.map(notifHTML).join('') : '<li class="empty"><p>Nothing yet. When someone adds or deletes an item, it shows up here.</p></li>';
+      const shown = kf ? list.filter(n => KF[kf].includes(n.kind)) : list;
+      ul.innerHTML = shown.length ? shown.map(notifHTML).join('') : '<li class="empty"><p>Nothing here yet.</p></li>';
     }
     async function load(append) {
       const before = append && list.length ? list[list.length - 1].id : '';
@@ -919,8 +1471,8 @@
       if (n.itemExists && !n.itemDeleted) go(`#/${t.path}/${encodeURIComponent(n.itemId)}`);
       else paint(Math.max(0, S.unread - 1));
     });
-    pageRefresh = () => load(false);
-    await load(false);
+    pageRefresh = async () => { if (!okEl.querySelector('input:focus')) await reloadAll(); };
+    await reloadAll();
   }
 
   // ---------- backup (admin) ----------
@@ -929,7 +1481,7 @@
     app.innerHTML = `
       <section class="panel">
         <h2>Download a backup</h2>
-        <p>One file with all materials, tools, photos and people. Keep it somewhere safe and private (it contains sign-in info).</p>
+        <p>One file with all materials, tools, equipment (hours/miles, maintenance records, repair requests), photos and people. Keep it somewhere safe and private (it contains sign-in info).</p>
         <a class="btn btn-primary btn-wide" href="api/backup" download id="dlBackup">Download backup file</a>
       </section>
       <section class="panel">
@@ -949,7 +1501,7 @@
         const text = await f.text();
         try { JSON.parse(text); } catch (e) { throw new Error('This is not a backup file.'); }
         const r = await api('POST', 'restore', text);
-        st.textContent = `Done: ${r.items} ${r.items === 1 ? 'item' : 'items'} restored` + (r.people ? `, ${r.people} people added` : '') + (r.skipped ? ` (${r.skipped} skipped because they were not valid)` : '') + '.';
+        st.textContent = `Done: ${r.items} ${r.items === 1 ? 'item' : 'items'} restored` + (r.records ? `, ${r.records} maintenance/repair records` : '') + (r.repairs ? `, ${r.repairs} repair requests` : '') + (r.people ? `, ${r.people} people added` : '') + (r.skipped ? ` (${r.skipped} skipped because they were not valid)` : '') + '.';
         toast('Restore finished');
       } catch (ex) { st.textContent = 'Could not restore: ' + ex.message; }
       finally { imp.value = ''; }
@@ -981,6 +1533,18 @@
       else if (parts[0] === 'account') parts[1] === 'password' ? renderPasswordForm(false) : renderAccount();
       else if (parts[0] === 'backup') renderBackup();
       else if (parts[0] === 'notifications') await renderNotifications();
+      else if (parts[0] === 'requests') await renderMyRequests();
+      else if (parts[0] === 'equipment' && parts[1] && parts[1] !== 'new' && parts[2] && parts[2] !== 'edit') {
+        const [p0, q] = location.hash.split('?');
+        const query = Object.fromEntries(new URLSearchParams(q || ''));
+        const ps = p0.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+        if (ps[2] === 'meter') await renderMeter(ps[1]);
+        else if (ps[2] === 'repair') await renderRepairForm(ps[1]);
+        else if (ps[2] === 'log' && ps[3] === 'new') await renderRecordForm(ps[1], null, 'new', query);
+        else if (ps[2] === 'log' && ps[3] && ps[4] === 'edit' && isAdmin()) await renderRecordForm(ps[1], ps[3], 'edit', query);
+        else if (ps[2] === 'log' && ps[3] && ps[4] === 'ask') await renderRecordForm(ps[1], ps[3], 'ask', query);
+        else return go('#/equipment/' + encodeURIComponent(ps[1]));
+      }
       else if (parts[0] === 'people') {
         if (!parts[1]) await renderPeople();
         else if (parts[1] === 'new') renderAddPerson();

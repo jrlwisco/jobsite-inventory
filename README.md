@@ -1,18 +1,21 @@
-# Job Site Inventory (v2.1): shared, with sign-in and notifications
+# Job Site Inventory (v2.2): materials, tools, and equipment & maintenance
 
-A simple app for keeping track of **Materials** and **Tools**: the name, how many there are, where they are, a photo, and notes.
+A simple app for keeping track of **Materials**, **Tools** and **Equipment & Maintenance**: the name, how many there are, where they are, a photo, and notes.
 Everyone on the crew sees the same list. People sign in with a username and password.
 It works in the browser on iPhone, Android, Windows and Mac, and can be installed to the home screen.
 
 - **Frontend**: plain HTML/CSS/JS in `public/`. It's an installable PWA with a service worker, so the app opens even with no signal.
 - **Backend**: Node.js 22, Express and SQLite (`better-sqlite3`), in `server/`. Photos are saved as files and only signed-in people can see them.
-- **v1** (the offline-only version that stored everything on each device) is kept under git tag `v1`, and v2 before notifications is under tag `v2`.
+- **v1** (the offline-only version that stored everything on each device) is kept under git tag `v1`, v2 before notifications is under tag `v2`, and v2.1 (before Equipment) under tag `v2.1`.
 
 ## Who can do what
 | | Crew | Admin |
 |---|---|---|
 | See, search, add, edit (all fields, including replacing or removing the photo) and delete items | ✓ | ✓ |
-| Get notifications (bell + phone/desktop alerts) when items are added or deleted | | ✓ |
+| Equipment: update hours/miles, add maintenance/repair records, **ask to change** a locked record, **request a repair** | ✓ | ✓ |
+| See the answers to your own requests (bell → **My requests**) | ✓ | ✓ |
+| Get notifications (bell + phone/desktop alerts) for approvals, repair requests, adds and deletes | | ✓ |
+| Approve/deny record changes, edit or delete records directly, set repair request status | | ✓ |
 | Restore a deleted item | | ✓ |
 | Add people (as Crew or Admin), make someone Admin or Crew, reset passwords, turn sign-in off or on, remove people | | ✓ |
 | Download backup / restore (including old v1 backup files) | | ✓ |
@@ -27,16 +30,55 @@ It works in the browser on iPhone, Android, Windows and Mac, and can be installe
 - Delete always asks first. Deleted items are hidden, not destroyed. Admins can **restore** them from Notifications for
   90 days (`DELETED_KEEP_DAYS`), after which the item and its photo are removed for good.
 
+## Equipment & Maintenance (v2.2)
+A third big green button on the home page. Machines have the same fields as materials and tools (name, quantity, location,
+photo, description; anyone can add, edit or delete; deletes can be restored by an admin; home search and location filter work), plus:
+
+- **Hours / Miles meter.** Each machine is measured in Hours or Miles (picked when adding it; can be changed in Edit).
+  The details page shows the reading in big numbers, when it was last updated and by whom, and a big **Update hours/miles** button
+  that opens a large number entry. A **History** list shows the last 20 readings with who/when.
+  If a new reading is **lower** than the last one, the app asks "Save anyway?"; if saved, it is marked "Lower than before"
+  in the history and admins get a **Meter lower than before** notification (no phone alert).
+- **Maintenance & Repair Record** (on each machine, newest first). Anyone can add an entry: Maintenance or Repair, date done,
+  hours/miles at the time (filled in from the current reading), what was done, who did it / shop, optional cost, and up to 4 photos (receipts).
+  - Once saved, an entry is **locked**. Crew can't change or delete it. Instead they tap **Ask to change**, fix the fields
+    (or switch on "Ask to delete this entry instead") and say why. This sends **Approval needed** to every admin (Notifications + phone alert).
+    The entry shows **"Change waiting for approval"** until an admin decides; only one request per entry can be waiting.
+  - The admin sees **Now** and **Change to** side by side for each changed field, with big **Approve** / **Deny** buttons and an optional note.
+    Only on Approve does the record change. The person who asked gets an in-app notice either way.
+  - Every entry keeps an **audit trail**, e.g. "Changed on Oct 5, asked by Mike Torres, approved by Sara Lopez: cost $89.50 → $95.00"
+    or "Change asked by Mike on Oct 5 was not approved by Joseph: 'We need this for the warranty'".
+  - **Admins can edit or delete entries directly** (including adding/removing photos). This is also written to the audit trail
+    ("Changed on Oct 5 by Joseph (admin)"). Deleted entries stay in the database (hidden) for the record.
+  - Crew change requests cover the text fields and deletion; photos on a saved entry can only be changed by an admin.
+- **Repair requests.** A big red **Request a repair** button on each machine: what's wrong, how urgent (**Can wait / Soon / DOWN — not usable**),
+  an optional photo, and the current hours/miles. All admins get a notification + phone alert.
+  - The machine shows a badge on its card and details page: red **DOWN — not usable**, orange **Repair requested**, or **Repair in progress**.
+  - Admins mark a request **In progress**, **Done** or **Declined** (a note is required to decline). **Done** offers to add a Repair entry
+    to the record, already filled in (type Repair, the problem, the hours/miles). The requester is notified of each change.
+  - The Equipment list has a **Needs repair only** filter. The home page shows admins how many machines need repair, and a
+    **Needs your OK** banner with the number of changes to approve and open repair requests.
+- **Notifications.** The admin Notifications page starts with a **Needs your OK** section (all waiting approvals and open repair requests,
+  with their buttons right there), then the feed. New kinds: Approval needed, Repair request, Meter lower than before, Record added/changed.
+  Filters: **Important / Everything**, and **All / Approvals / Repairs / Meter / Items**. Phone alerts are sent for approvals and repair requests
+  (plus adds, deletes and restores as before).
+- **Crew notifications.** Crew now have a bell too. It opens **My requests**: new answers at the top, then their repair requests and change requests
+  with the status (Waiting / Approved by … / Not approved / In progress / Done / Declined) and any note. Crew don't get phone alerts.
+- **Backup/restore** (backup file version 3) includes machines, meter readings, maintenance records with photos, audit trails,
+  change requests and repair requests. Older backup files still restore.
+- **Upgrading** from v2.1: the database is migrated automatically on first start (schema version 3). Existing items, people,
+  notifications and push subscriptions are kept. Back up `DATA_DIR` first, as always.
+
 ## Notifications (admins)
 - **Bell in the top bar** with a count of unread notifications. Each admin has their own read/unread state.
   Tapping a notification marks it read and opens the item. There's also a **Mark all read** button.
 - Each entry looks like: "**Mike Torres** added **Concrete mix 80 lb bags** — Qty 24 — Truck 2 — Oct 3, 4:14 PM", with the photo.
 - **Deleted** entries show what was deleted (name, quantity, location, description, photo) and a big **Restore** button.
-- A filter switches between **Adds & deletes** (the default) and **Everything** (also edits and quantity changes).
+- A filter switches between **Important** (the default: adds, deletes, restores, approvals, repair requests, low meter readings, answers) and **Everything** (also edits, quantity changes and record entries).
   Edits list what changed. Many +/− taps by one person on one item within 10 minutes count as one entry ("24 → 27").
   The unread count follows the filter you picked. Your own actions never count as unread.
 - **Phone/desktop alerts (Web Push)**: on the home screen or the Notifications page, tap **Turn on notifications on this device**.
-  Alerts are sent for adds, deletes and restores (not for edits or quantity changes, to keep it quiet).
+  Alerts are sent for approvals needed, repair requests, adds, deletes and restores (not for edits or quantity changes, to keep it quiet).
   The app icon badge shows the unread count where the device supports it.
   - **iPhone/iPad:** this only works when the app has been **added to the Home Screen** (Safari → Share → Add to Home Screen)
     on **iOS/iPadOS 16.4 or newer**, and is opened from there. In a normal Safari tab the app shows these steps instead of the button.
@@ -133,7 +175,8 @@ and keeps what was typed on the screen. Changes are not queued for later.
 
 ## Files
     public/   index.html, app.js, styles.css, sw.js, manifest.json, icons/
-    server/   server.js (API, notifications, push, static files), db.js (schema + migrations), reset-password.js
+    server/   server.js (API, notifications, push, static files), equipment.js (meter, records, approvals, repair requests),
+              db.js (schema + migrations), reset-password.js
     Dockerfile, docker-entrypoint.sh, render.yaml, .env.example
     screenshots/   example screens (sample data)
     dev/make_icons.py   (draws the icons; not needed to run)
