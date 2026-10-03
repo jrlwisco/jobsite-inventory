@@ -24,7 +24,12 @@
       <span>Back</span>
     </button>
     <h1 id="pageTitle">Inventory</h1>
+    <button id="acctBtn" class="acct-btn" type="button" hidden aria-label="My account">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4.2" fill="currentColor"/><path fill="currentColor" d="M3.5 21a8.5 8.5 0 0 1 17 0z"/></svg>
+      <span></span>
+    </button>
   </header>
+  <div id="offlineBanner" class="offline-banner" role="status" hidden>No connection &mdash; changes can't be saved right now.</div>
   <main id="app" tabindex="-1"></main>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div id="modal" class="modal" hidden>
@@ -37,7 +42,6 @@
     </div>
   </div>
   <noscript><p style="padding:20px;font-size:20px">This app needs JavaScript turned on.</p></noscript>
-  <script src="db.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,17 @@
+# Render Blueprint: creates the web service with a 1 GB persistent disk.
+# In Render: New + > Blueprint > pick this repository.
+services:
+  - type: web
+    name: jobsite-inventory
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: SETUP_CODE
+        sync: false   # Render asks you to type this in; needed once to create the admin account
+    disk:
+      name: inventory-data
+      mountPath: /data
+      sizeGB: 1
