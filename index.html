@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Job Site Inventory</title>
+  <meta name="description" content="Keep track of materials and tools.">
+  <meta name="theme-color" content="#111111">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <!-- iOS home screen support -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Inventory">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button id="backBtn" class="back-btn" type="button" hidden aria-label="Go back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Back</span>
+    </button>
+    <h1 id="pageTitle">Inventory</h1>
+  </header>
+  <main id="app" tabindex="-1"></main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box" role="alertdialog" aria-modal="true" aria-labelledby="modalText">
+      <p id="modalText"></p>
+      <div class="modal-actions">
+        <button id="modalCancel" type="button" class="btn btn-light">Cancel</button>
+        <button id="modalOk" type="button" class="btn btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+  <noscript><p style="padding:20px;font-size:20px">This app needs JavaScript turned on.</p></noscript>
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
