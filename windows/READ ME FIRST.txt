@@ -1,0 +1,59 @@
+JOBSITE INVENTORY ON YOUR WINDOWS LAPTOP - READ ME FIRST
+==========================================================
+
+1. INSTALL NODE.JS (one time)
+   Go to https://nodejs.org/en/download , click "Windows Installer (.msi)" (the LTS
+   version), open it and click Next until it is finished. Keep all the normal settings.
+   (If you skip this, "Start Inventory" opens that page for you.)
+
+2. START THE INVENTORY
+   Double-click "Start Inventory". If Windows says "Windows protected your PC",
+   click "More info" and then "Run anyway".
+   The first time it gets ready for a minute or two (needs internet once).
+   Your browser opens the inventory by itself. A blue window says
+   "INVENTORY IS RUNNING. LEAVE THIS WINDOW OPEN." - you can minimize it.
+
+3. WINDOWS FIREWALL QUESTION (first time)
+   Windows asks about "Node.js". Tick "Private networks", then click "Allow".
+   This lets phones on your Wi-Fi reach the inventory.
+
+4. CREATE YOUR ADMIN ACCOUNT (first time, on the laptop)
+   Type your name, a username and a password. This is the boss account.
+   (For safety, this first account can only be made on the laptop itself.)
+
+5. ADD YOUR CREW
+   Home page > People > Add a person. Give each person their username and the
+   temporary password shown. They pick their own password the first time.
+
+6. PHONES (same Wi-Fi as the laptop)
+   The blue window shows an address like  http://192.168.1.23:3000
+   Type it into the phone's browser (Safari or Chrome) and sign in.
+   Taking photos with the phone works. On phones over Wi-Fi there are no pop-up
+   phone alerts and no offline mode - check the bell in the app for news.
+   If a phone can't connect: make sure it is on the SAME Wi-Fi (not cell data),
+   and on the laptop set the Wi-Fi network to "Private" (Settings > Network &
+   internet > Wi-Fi > your network > Private network).
+
+7. BACKUPS
+   Double-click "Backup Inventory" (it can run while the inventory is open).
+   It saves a zip in Documents\Inventory Backups. Copy that folder to a USB stick
+   or cloud drive now and then. The app's own Backup button (admins) also works.
+
+8. HOW TO STOP
+   Close the blue window. To use it again, double-click "Start Inventory".
+   The inventory only works while the laptop is on, awake and the window is open.
+   Tip: Settings > System > Power > set "Sleep" to Never while plugged in.
+
+9. START BY ITSELF (optional)
+   Double-click "Start automatically when Windows starts". To undo, double-click
+   "Stop starting automatically".
+
+WHERE YOUR DATA IS: C:\Users\<you>\AppData\Local\JobsiteInventory\data
+(open it: press Windows key + R, type  %LOCALAPPDATA%\JobsiteInventory  and Enter).
+It is NOT inside this folder, so replacing this folder with a newer version keeps
+all your data. Don't delete that folder.
+
+RESTORE A BACKUP ZIP: close the blue window. Open the folder above. Rename the
+"data" folder to "data-old". Double-click the backup zip - inside it is a folder
+called "data". Drag that "data" folder into the open JobsiteInventory folder.
+Then double-click "Start Inventory" again.

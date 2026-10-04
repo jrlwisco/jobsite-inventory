@@ -146,7 +146,7 @@
 
   async function loadState() {
     const s = await api('GET', 'state');
-    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.unread = s.unread || 0; S.inbox = s.inbox || null;
+    S.user = s.user; S.settings = s.settings || S.settings; S.setupNeeded = s.setupNeeded; S.setupCodeRequired = s.setupCodeRequired; S.setupLocalOnly = !!s.setupLocalOnly; S.unread = s.unread || 0; S.inbox = s.inbox || null;
     if (s.categories) { S.cats = s.categories; S.fieldDefs = s.fieldDefs; S.units = s.units; S.icons = s.icons; }
   }
   async function loadCats() {
@@ -261,6 +261,15 @@
   // ---------- sign in / setup ----------
   function renderSetup() {
     setHeader('Welcome', null, false);
+    if (S.setupLocalOnly) {
+      app.innerHTML = `<div class="auth-wrap"><img class="auth-logo" src="icons/icon-192.png" alt="">
+        <h2>Almost ready</h2>
+        <p>The boss needs to create the admin account first, <b>on the computer that runs the inventory</b>.</p>
+        <p>Then come back here and sign in.</p>
+        <button class="btn btn-primary btn-wide" type="button" id="reloadSetup">Check again</button></div>`;
+      app.querySelector('#reloadSetup').addEventListener('click', () => location.reload());
+      return;
+    }
     app.innerHTML = `
       <div class="auth-wrap">
         <img class="auth-logo" src="icons/icon-192.png" alt="">
@@ -1526,6 +1535,7 @@
   // on | off | denied | ios-home | unsupported
   async function pushState() {
     const supported = window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    if (!window.isSecureContext) return 'insecure'; // e.g. a phone opening http://192.168.x.x:3000 on the office Wi-Fi
     if (!supported) return isIOS() && !isStandalone() ? 'ios-home' : 'unsupported';
     if (Notification.permission === 'denied') return 'denied';
     const sub = await currentSub().catch(() => null);
@@ -1568,7 +1578,9 @@
     if (opts.promptOnly && st !== 'off' && st !== 'ios-home') { el.innerHTML = ''; return; }
     const head = `<h2>${ICONS.bell} Alerts on this device</h2>`;
     let body = '';
-    if (st === 'on') body = `<p class="ok-line">Notifications are <b>ON</b> for this device.</p>
+    if (st === 'insecure') body = `<p>Phone alerts need a secure (https) address, so they are off when the inventory runs on a computer in the office.
+      Check the <b>bell</b> at the top instead — it shows everything new.</p>`;
+    else if (st === 'on') body = `<p class="ok-line">Notifications are <b>ON</b> for this device.</p>
         <div class="two-btns"><button type="button" class="btn btn-light" id="pushTest">Send a test</button>
         <button type="button" class="btn btn-light" id="pushOff">Turn off</button></div>`;
     else if (st === 'off') body = `<p>Get an alert on this device when a change needs your OK, a repair is requested, or someone adds or deletes an item.</p>

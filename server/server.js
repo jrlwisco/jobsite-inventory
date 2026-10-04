@@ -3,7 +3,7 @@
  * Job Site Inventory - server
  * Node + Express + SQLite. Serves the app (../public) and a small JSON API.
  * Settings come from environment variables (see README):
- *   PORT, HOST, DATA_DIR, COOKIE_SECURE (auto|true|false), TRUST_PROXY, SETUP_CODE, VAPID_SUBJECT
+ *   PORT, HOST, DATA_DIR, COOKIE_SECURE (auto|true|false), TRUST_PROXY, SETUP_CODE, SETUP_LOCAL_ONLY, VAPID_SUBJECT
  */
 const path = require('node:path');
 const fs = require('node:fs');
@@ -20,6 +20,9 @@ const PHOTO_DIR = path.join(DATA_DIR, 'photos');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || 'auto').toLowerCase();
 const SETUP_CODE = process.env.SETUP_CODE || '';
+// SETUP_LOCAL_ONLY=1 (used by the Windows launcher): the first admin account can only be created on the computer running the app.
+const SETUP_LOCAL_ONLY = process.env.SETUP_LOCAL_ONLY === '1';
+const isLocalRequest = req => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 const SESSION_DAYS = 30;
 const SESSION_MS = SESSION_DAYS * 24 * 3600 * 1000;
 const BCRYPT_ROUNDS = 12;
@@ -229,7 +232,7 @@ const userCount = () => db.prepare('SELECT COUNT(*) c FROM users').get().c;
 
 app.get('/api/state', (req, res) => {
   res.json({
-    setupNeeded: userCount() === 0, setupCodeRequired: !!SETUP_CODE, user: publicUser(req.user), settings: settingsObj(),
+    setupNeeded: userCount() === 0, setupCodeRequired: !!SETUP_CODE, setupLocalOnly: SETUP_LOCAL_ONLY && !isLocalRequest(req), user: publicUser(req.user), settings: settingsObj(),
     unread: req.user && !req.user.mustChangePassword ? unreadCount(req.user.id) : 0,
     inbox: req.user && req.user.role === 'admin' && !req.user.mustChangePassword ? inboxCounts() : null,
     ...(req.user ? { categories: cats.allCats(), fieldDefs: cats.FIELD_DEFS, units: cats.UNITS, icons: cats.ICONS } : {})
@@ -240,6 +243,7 @@ app.post('/api/setup', (req, res) => {
   const ipKey = 'setup:' + req.ip;
   if (limited(ipKey, 10, WINDOW)) throw new HttpError(429, TOO_MANY);
   hit(ipKey);
+  if (SETUP_LOCAL_ONLY && !isLocalRequest(req)) throw new HttpError(403, 'For safety, create the admin account on the computer that runs the inventory (http://localhost).');
   if (SETUP_CODE) {
     const a = Buffer.from(String(req.body.setupCode || '')), b = Buffer.from(SETUP_CODE);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new HttpError(403, 'Setup code is wrong.');

@@ -1,4 +1,4 @@
-# Job Site Inventory (v2.3): materials by category, tools, and equipment & maintenance
+# Job Site Inventory (v2.3.1): materials by category, tools, and equipment & maintenance
 
 A simple app for keeping track of **Materials**, **Tools** and **Equipment & Maintenance**: the name, how many there are, where they are, a photo, and notes.
 Everyone on the crew sees the same list. People sign in with a username and password.
@@ -122,6 +122,32 @@ photo, description; anyone can add, edit or delete; deletes can be restored by a
   If that file is lost, every device has to turn notifications on again. Set `VAPID_SUBJECT` to `mailto:you@yourcompany.com`
   (Apple's push service wants a real contact address).
 
+## Run it on a Windows laptop (double-click, no hosting)
+Download **Jobsite-Inventory-Windows.zip** from the GitHub Releases page, right-click it, choose
+**Extract All...**, then follow `READ ME FIRST.txt` in the "Jobsite Inventory" folder. In short:
+install Node.js LTS from nodejs.org (accept the defaults), then double-click **Start Inventory**.
+
+- The first run installs the app's parts once (internet needed). better-sqlite3 ships ready-made Windows
+  binaries and `.npmrc` sets `ignore-scripts=true`, so nothing is ever compiled (no Visual Studio needed).
+- The browser opens `http://localhost:3000` (or 3001... if 3000 is busy). The window shows the address
+  phones on the same Wi-Fi can use, e.g. `http://192.168.1.23:3000`. Closing the window stops the app.
+- Data is kept in `%LOCALAPPDATA%\JobsiteInventory\data`, **outside** the app folder, so replacing the
+  folder with a newer version never touches the data.
+- The first admin account can only be created from the laptop itself (`SETUP_LOCAL_ONLY=1`); no setup code.
+- **Backup Inventory** writes `Documents\Inventory Backups\Inventory Backup YYYY-MM-DD HHMM.zip`
+  (safe while the app runs). Optional: **Start automatically when Windows starts** / **Stop starting automatically**.
+- Phones use plain http on the Wi-Fi: sign-in, photos and everything else work, but phone push alerts,
+  offline mode and "install to home screen" need https, so they are off there (the bell still shows news).
+  The laptop itself (localhost) is a secure context, so those work on it.
+- To build the zip: `python3 dev/build_windows.py` (files are in `windows/`).
+
+| Variable (launcher) | Default | What it does |
+|---|---|---|
+| `INVENTORY_DATA_DIR` | `%LOCALAPPDATA%\JobsiteInventory\data` | Where the data is kept |
+| `INVENTORY_PORT` | first free of 3000-3020 | Fixed port |
+| `INVENTORY_NO_BROWSER` | (off) | `1` = don't open the browser (also `--startup`) |
+| `SETUP_LOCAL_ONLY` | `1` in the launcher, off on servers | Only allow creating the first admin from localhost |
+
 ## Run it on your computer
 Requires Node.js 22 or newer.
 
@@ -141,6 +167,7 @@ The data (`inventory.db` plus `photos/`) is saved in `DATA_DIR`, which defaults 
 | `DATA_DIR` | `./data` | Where the database and photos are stored. Put this on a persistent disk. |
 | `SETUP_CODE` | (none) | **Set this on a public server.** It's needed to create the first admin account, so a stranger can't do it first. |
 | `COOKIE_SECURE` | `auto` | `auto` marks cookies Secure when the request came over https |
+| `SETUP_LOCAL_ONLY` | (off) | `1` = the first admin account can only be created from the computer running the app (localhost) |
 | `TRUST_PROXY` | `1` | Number of proxies in front of the app (Render/Railway/Fly have 1). Set `false` if the app is exposed directly. |
 | `ALLOWED_ORIGINS` | (none) | Extra allowed origins, comma-separated (rarely needed) |
 | `MAX_RESTORE_SIZE` | `500mb` | Largest backup file that can be restored |
@@ -212,6 +239,7 @@ and keeps what was typed on the screen. Changes are not queued for later.
     server/   server.js (API, notifications, push, static files), equipment.js (meter, records, approvals, repair requests),
               categories.js + catalog.js (material categories, units, extra fields),
               db.js (schema + migrations), reset-password.js
+    windows/  Windows launcher (launcher.js, backup.js) + the .bat files and READ ME FIRST.txt for the zip
     Dockerfile, docker-entrypoint.sh, render.yaml, .env.example
     screenshots/   example screens (sample data)
-    dev/make_icons.py   (draws the icons; not needed to run)
+    dev/make_icons.py   (draws the icons; not needed to run), dev/build_windows.py (builds the Windows zip)

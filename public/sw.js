@@ -1,5 +1,5 @@
 /* Service worker: lets the app open with no internet. Bump VERSION when files change. */
-const VERSION = 'v2.3.0';
+const VERSION = 'v2.3.1';
 const SHELL = 'jobsite-inventory-' + VERSION;
 const API_CACHE = 'jobsite-api'; // last-seen lists/photos for viewing offline (cleared on sign-out)
 const FILES = [
