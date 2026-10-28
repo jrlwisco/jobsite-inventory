@@ -1,4 +1,4 @@
-# Job Site Inventory (v2.4.0): materials by main/subcategory, tools, and equipment & maintenance
+# Job Site Inventory (v2.4.1): materials by main/subcategory, tools, and equipment & maintenance
 
 A simple app for keeping track of **Materials**, **Tools** and **Equipment & Maintenance**: the name, how many there are, where they are, a photo, and notes.
 Everyone on the crew sees the same list. People sign in with a username and password.
@@ -45,7 +45,7 @@ Starting tree (parents → leaves):
 4. **Underground Utilities** → Drainage, Storm & Sewer · Water & Underground Utilities
 5. **Building Structure & Shell** → Framing, Lumber & Sheathing · Roofing · Siding & Exterior Finishes · Insulation & Weatherproofing · Doors & Windows
 6. **Interior Finishes** → Drywall & Interior Finishes · Flooring & Tile · Paint, Caulk & Adhesives
-7. **MEP** → Plumbing · HVAC & Ductwork · Electrical · Low Voltage, Data & Communications · Fire Protection & Life Safety
+7. **Plumbing, HVAC, Electrical & Low Voltage** (one combined main; id `mep`) → Plumbing · HVAC & Ductwork · Electrical · Low Voltage, Data & Communications · Fire Protection & Life Safety
 8. **Hardware & Safety** → Fasteners, Anchors & Hardware · Safety & PPE
 9. **Other / Uncategorized** (top-level)
 
@@ -67,8 +67,7 @@ Concrete & Cement → Concrete, Cement & Masonry; Roads & Bridges → Asphalt & 
 - **Notifications** name the category, e.g. "12/2 Romex (Electrical) — Qty 3 rolls — 250 ft — Truck 2"; edits list category/unit/length changes.
 - **Backup/restore** (backup version 5) includes the category list (names, icons, order, hidden, parent, extra fields) and each item's category, unit and extra fields.
   Older backups restore into "Other / Uncategorized" (v4 backups keep flat categories; reopen the app once so schema v5 applies hierarchy).
-- **Upgrading** from v2.3: schema version 5 adds `parent_id`, inserts main groups, renames/merges leaves as above. From v2.2: schema 4 then 5;
-  existing materials go to **Other / Uncategorized** with unit "each" until moved.
+- **Upgrading** from v2.4.0: schema version 6 keeps the single combined trades parent (does **not** split Plumbing/HVAC/Electrical/Low Voltage into four mains) and renames it to **Plumbing, HVAC, Electrical & Low Voltage**. From v2.3: schema 5 then 6 adds `parent_id`, inserts main groups, merges leftover flats. From v2.2: schema 4 then 5 then 6; existing materials go to **Other / Uncategorized** with unit "each" until moved.
 
 ## Equipment & Maintenance (v2.2)
 A third big green button on the home page. Machines have the same fields as materials and tools (name, quantity, location,

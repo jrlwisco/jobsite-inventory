@@ -52,7 +52,8 @@ const PARENT_SEED = [
   ['underground', 'Underground Utilities', '💧'],
   ['building-shell', 'Building Structure & Shell', '🏠'],
   ['interior', 'Interior Finishes', '🖌️'],
-  ['mep', 'MEP', '⚡'],
+  // Combined trades parent (keep id "mep"; display name is the four trades, not four separate mains)
+  ['mep', 'Plumbing, HVAC, Electrical & Low Voltage', '⚡'],
   ['hardware-safety', 'Hardware & Safety', '🦺']
 ];
 
@@ -186,4 +187,37 @@ function applyHierarchyV5(db, t) {
   }
 }
 
-module.exports = { FIELD_DEFS, FIELD_KEYS, UNITS, ICONS, SEED, PARENT_SEED, OTHER_ID, HIDDEN_SEED_IDS, seedCategories, applyHierarchyV5 };
+
+/** v2.4.1: keep one combined trades parent (id mep); clearer display name; leaves stay Plumbing/HVAC/Electrical/LV/Fire. */
+function applyHierarchyV6(db, t) {
+  // Ensure combined parent exists and is named clearly (do not split into four mains)
+  const row = db.prepare('SELECT id FROM categories WHERE id = ?').get('mep');
+  if (row) {
+    db.prepare("UPDATE categories SET name = ?, icon = ?, parent_id = NULL, hidden = 0 WHERE id = ?")
+      .run('Plumbing, HVAC, Electrical & Low Voltage', '⚡', 'mep');
+  } else {
+    db.prepare(
+      'INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,0,?,?,?)'
+    ).run('mep', 'Plumbing, HVAC, Electrical & Low Voltage', '⚡', 700, '[]', t, null);
+  }
+
+  const leafUpserts = [
+    ['plumbing', 'Plumbing', '🚰', 'mep', JSON.stringify(['length', 'pipeSize', 'pipeMaterial'])],
+    ['hvac', 'HVAC & Ductwork', '🌬️', 'mep', '[]'],
+    ['electrical', 'Electrical', '⚡', 'mep', JSON.stringify(['length', 'wireGauge', 'wireType'])],
+    ['low-voltage', 'Low Voltage, Data & Communications', '📶', 'mep', JSON.stringify(['length', 'cableType'])],
+    ['fire', 'Fire Protection & Life Safety', '🧯', 'mep', '[]']
+  ];
+  const upd = db.prepare('UPDATE categories SET name = ?, icon = ?, parent_id = ?, hidden = 0, fields = ? WHERE id = ?');
+  leafUpserts.forEach(([id, name, icon, parentId, fields], i) => {
+    const existing = db.prepare('SELECT id FROM categories WHERE id = ?').get(id);
+    if (existing) upd.run(name, icon, parentId, fields, id);
+    else {
+      db.prepare(
+        'INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,0,?,?,?)'
+      ).run(id, name, icon, 700 + (i + 1) * 10, fields, t, parentId);
+    }
+  });
+}
+
+module.exports = { FIELD_DEFS, FIELD_KEYS, UNITS, ICONS, SEED, PARENT_SEED, OTHER_ID, HIDDEN_SEED_IDS, seedCategories, applyHierarchyV5, applyHierarchyV6 };

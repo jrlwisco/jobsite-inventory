@@ -245,6 +245,14 @@ function openDb(dataDir) {
       db.pragma('user_version = 5');
     })();
   }
+  if (db.pragma('user_version', { simple: true }) < 6) {
+    // v2.4.1: keep one combined trades parent (mep); clearer name; do not split Plumbing/HVAC/Electrical/LV into four mains.
+    const { applyHierarchyV6 } = require('./catalog');
+    db.transaction(() => {
+      applyHierarchyV6(db, Date.now());
+      db.pragma('user_version = 6');
+    })();
+  }
   return db;
 }
 module.exports = { openDb };
