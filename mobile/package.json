@@ -1,0 +1,31 @@
+{
+  "name": "jobsite-inventory-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native Capacitor wrapper for Job Site Inventory (loads https://jobsite-inventory.onrender.com). For Apple App Store and Google Play.",
+  "author": "Joseph Liethen / jrlwisco",
+  "license": "UNLICENSED",
+  "scripts": {
+    "sync": "npx cap sync",
+    "open:ios": "npx cap open ios",
+    "open:android": "npx cap open android",
+    "add:ios": "npx cap add ios",
+    "add:android": "npx cap add android",
+    "build:sync": "npx cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/core": "7.6.9",
+    "@capacitor/ios": "7.6.9",
+    "@capacitor/splash-screen": "7.0.5",
+    "@capacitor/status-bar": "7.0.6"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.9",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

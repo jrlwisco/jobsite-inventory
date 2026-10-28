@@ -4,6 +4,13 @@ A simple app for keeping track of **Materials**, **Tools** and **Equipment & Mai
 Everyone on the crew sees the same list. People sign in with a username and password.
 It works in the browser on iPhone, Android, Windows and Mac, and can be installed to the home screen.
 
+## Native phone apps (App Store / Google Play)
+
+A Capacitor wrapper lives in **`mobile/`** so Job Site Inventory can be submitted as a real App Store / Play Store app (not “Add to Home Screen”). It loads the live site `https://jobsite-inventory.onrender.com`.
+
+- Start here: [`mobile/README.md`](mobile/README.md)
+- Store submit checklist: [`mobile/MOBILE.md`](mobile/MOBILE.md)
+
 - **Frontend**: plain HTML/CSS/JS in `public/`. It's an installable PWA with a service worker, so the app opens even with no signal.
 - **Backend**: Node.js 22, Express and SQLite (`better-sqlite3`), in `server/`. Photos are saved as files and only signed-in people can see them.
 - **v1** (the offline-only version that stored everything on each device) is kept under git tag `v1`, v2 before notifications is under tag `v2`, v2.1 (before Equipment) under tag `v2.1`, and v2.2 (before material categories) under tag `v2.2`.

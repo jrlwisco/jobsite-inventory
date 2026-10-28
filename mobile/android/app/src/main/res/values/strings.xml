@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Job Site Inventory</string>
+    <string name="title_activity_main">Job Site Inventory</string>
+    <string name="package_name">com.jrlwisco.jobsiteinventory</string>
+    <string name="custom_url_scheme">com.jrlwisco.jobsiteinventory</string>
+</resources>

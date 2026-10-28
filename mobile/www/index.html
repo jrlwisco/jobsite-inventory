@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Job Site Inventory</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1b5e20; color: #fff; }
+    .wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center; box-sizing: border-box; }
+    h1 { font-size: 1.5rem; margin: 0 0 0.75rem; }
+    p { opacity: 0.9; line-height: 1.45; max-width: 22rem; }
+    a { color: #c8e6c9; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Job Site Inventory</h1>
+    <p>Opening the live app… If nothing loads, check your connection or open
+      <a href="https://jobsite-inventory.onrender.com">jobsite-inventory.onrender.com</a>.</p>
+  </div>
+  <script>
+    // Fallback when this package is built without server.url
+    if (!window.Capacitor || !window.Capacitor.getPlatform || window.Capacitor.getPlatform() === 'web') {
+      window.location.replace('https://jobsite-inventory.onrender.com');
+    }
+  </script>
+</body>
+</html>
