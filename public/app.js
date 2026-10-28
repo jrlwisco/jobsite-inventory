@@ -1,4 +1,4 @@
-/* Job Site Inventory v2 - shared inventory with sign-in (plain JavaScript, no libraries) */
+/* Job Site Inventory v2.4 - materials main/subcategory hierarchy (plain JavaScript, no libraries) */
 (function () {
   'use strict';
 
@@ -154,9 +154,9 @@
     S.cats = r.categories; S.fieldDefs = r.fieldDefs; S.units = r.units; S.icons = r.icons;
   }
 
-  // ---------- material categories ----------
+  // ---------- material categories (mains → subs → items) ----------
   const catById = id => (S.cats || []).find(c => c.id === id) || null;
-  const otherCat = () => catById('other') || { id: 'other', name: 'Other / Uncategorized', icon: '📦', fields: [] };
+  const otherCat = () => catById('other') || { id: 'other', name: 'Other / Uncategorized', icon: '📦', fields: [], parentId: null, isParent: false };
   function lengthLabel(cat) {
     const f = (cat && cat.fields) || [];
     return f.includes('wireGauge') || f.includes('wireType') ? 'Length of wire' : f.includes('cableType') ? 'Cable length' : f.includes('pipeSize') || f.includes('pipeMaterial') ? 'Pipe length' : 'Length';
@@ -169,6 +169,53 @@
     return Object.keys(defs).filter(k => defs[k].kind === 'choice' && e[k]).map(k => e[k]).join(' · ');
   }
   const catPath = id => '#/materials/c/' + encodeURIComponent(id || 'other');
+  const parentPath = id => '#/materials/p/' + encodeURIComponent(id);
+  const isParentCat = c => !!(c && (c.isParent || (S.cats || []).some(x => x.parentId === c.id)));
+  const childrenOf = id => (S.cats || []).filter(c => c.parentId === id).sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
+  // Main groups: parents with children, plus top-level leaves (e.g. Other) that are not themselves parents.
+  function mainCats() {
+    const cats = S.cats || [];
+    const parentIds = new Set(cats.filter(c => c.parentId).map(c => c.parentId));
+    return cats.filter(c => !c.parentId && (parentIds.has(c.id) || c.id === 'other' || !isParentCat(c)))
+      .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
+  }
+  function leafCats() {
+    return (S.cats || []).filter(c => !isParentCat(c));
+  }
+  function crumbsHTML(parts) {
+    // parts: [{ label, href? }]
+    return `<nav class="crumbs" aria-label="Breadcrumb">${parts.map((p, i) => {
+      const last = i === parts.length - 1;
+      return last || !p.href
+        ? `<span class="crumb current">${esc(p.label)}</span>`
+        : `<a class="crumb" href="${p.href}">${esc(p.label)}</a>`;
+    }).join('<span class="crumb-sep" aria-hidden="true">›</span>')}</nav>`;
+  }
+  function catOptionsHTML(selectedId) {
+    const leaves = leafCats().filter(c => !c.hidden || c.id === selectedId);
+    const byParent = new Map();
+    const orphans = [];
+    for (const c of leaves) {
+      if (c.parentId && catById(c.parentId)) {
+        if (!byParent.has(c.parentId)) byParent.set(c.parentId, []);
+        byParent.get(c.parentId).push(c);
+      } else orphans.push(c);
+    }
+    const parents = [...byParent.keys()].map(id => catById(id)).filter(Boolean)
+      .sort((a, b) => (a.sort - b.sort) || a.name.localeCompare(b.name));
+    let html = '';
+    for (const p of parents) {
+      html += `<optgroup label="${esc(p.icon + ' ' + p.name)}">`;
+      for (const c of byParent.get(p.id)) {
+        html += `<option value="${esc(c.id)}" ${c.id === selectedId ? 'selected' : ''}>${esc(c.icon)}  ${esc(c.name)}</option>`;
+      }
+      html += '</optgroup>';
+    }
+    for (const c of orphans) {
+      html += `<option value="${esc(c.id)}" ${c.id === selectedId ? 'selected' : ''}>${esc(c.icon)}  ${esc(c.name)}</option>`;
+    }
+    return html;
+  }
 
   // Search: every word typed must appear somewhere in name, quantity, location or description.
   function matches(item, query) {
@@ -176,7 +223,7 @@
     if (!words.length) return true;
     const hay = [item.name, fmtQty(item.quantity), item.location, item.description,
       item.meterValue != null ? fmtQty(item.meterValue) : '', item.repairStatus ? 'repair needs repair ' + item.repairStatus.level.replace('_', ' ') : '',
-      item.categoryName || '', item.unit && item.unit !== 'each' ? qtyText(item) : '',
+      item.categoryName || '', (item.categoryId && catById(item.categoryId) && catById(item.categoryId).parentId && catById(catById(item.categoryId).parentId)) ? catById(catById(item.categoryId).parentId).name : '', item.unit && item.unit !== 'each' ? qtyText(item) : '',
       item.extra && item.extra.length != null ? lenText(item.extra) + ' ' + fmtQty(item.extra.length) + (item.extra.lengthUnit || 'ft') : '',
       ...Object.values((item.extra && typeof item.extra === 'object') ? item.extra : {}).filter(v => typeof v === 'string')].join(' \u0001 ').toLowerCase();
     return words.every(w => hay.includes(w));
@@ -455,7 +502,24 @@
   }
 
   // ---------- list ----------
-  // Materials: big category buttons with counts, and one search box for all materials.
+  // Materials: main groups → subcategories → items. Search all materials on the home screen.
+  function leafCountMap(items) {
+    const counts = {};
+    items.forEach(i => { counts[i.categoryId] = (counts[i.categoryId] || 0) + 1; });
+    return counts;
+  }
+  function rollupCount(cat, counts) {
+    if (!isParentCat(cat)) return counts[cat.id] || 0;
+    return childrenOf(cat.id).reduce((n, ch) => n + (counts[ch.id] || 0), 0);
+  }
+  function catBtnHTML(c, n, href) {
+    return `<li><a class="cat-btn ${n ? '' : 'zero'}" href="${href}">
+      <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
+      <span class="cat-name">${esc(c.name)}</span>
+      <span class="cat-count">${n ? `${n} ${n === 1 ? 'item' : 'items'}` : 'Empty'}${c.hidden ? ' · hidden' : ''}</span>
+    </a></li>`;
+  }
+
   async function renderMaterialsHome() {
     const t = TYPES.material;
     setHeader('Materials', '#/');
@@ -484,15 +548,17 @@
       results.innerHTML = found.map(i => cardHTML(i, true)).join('');
     }
     function paintGrid() {
-      const counts = {};
-      items.forEach(i => { counts[i.categoryId] = (counts[i.categoryId] || 0) + 1; });
-      // Hidden categories disappear, unless something is still in them (so nothing gets lost).
-      const cats = (S.cats || []).filter(c => !c.hidden || counts[c.id]);
-      app.querySelector('#catGrid').innerHTML = cats.map(c => `<li><a class="cat-btn ${counts[c.id] ? '' : 'zero'}" href="${catPath(c.id)}">
-          <span class="cat-icon" aria-hidden="true">${esc(c.icon)}</span>
-          <span class="cat-name">${esc(c.name)}</span>
-          <span class="cat-count">${counts[c.id] ? `${counts[c.id]} ${counts[c.id] === 1 ? 'item' : 'items'}` : 'Empty'}${c.hidden ? ' · hidden' : ''}</span>
-        </a></li>`).join('');
+      const counts = leafCountMap(items);
+      // Main groups + top-level leaves (Other). Show a hidden main only if it still has items under it.
+      const mains = mainCats().filter(c => {
+        const n = rollupCount(c, counts);
+        return !c.hidden || n > 0;
+      });
+      app.querySelector('#catGrid').innerHTML = mains.map(c => {
+        const n = rollupCount(c, counts);
+        const href = isParentCat(c) ? parentPath(c.id) : catPath(c.id);
+        return catBtnHTML(c, n, href);
+      }).join('');
     }
     async function load() {
       const [r] = await Promise.all([api('GET', 'items?type=material'), loadCats().catch(() => {})]);
@@ -500,6 +566,30 @@
       paintGrid(); update();
     }
     wireSearch(app, 'matSearch', q => { st.q = q; update(); });
+    pageRefresh = load;
+    await load();
+  }
+
+  async function renderParentSubs(parentId) {
+    if (!S.cats) await loadCats();
+    let parent = catById(parentId);
+    if (!parent) { await loadCats(); parent = catById(parentId); }
+    if (!parent || !isParentCat(parent)) return go('#/materials');
+    setHeader(parent.name, '#/materials');
+    app.innerHTML = `
+      ${crumbsHTML([{ label: 'Materials', href: '#/materials' }, { label: parent.name }])}
+      <h2 class="cat-title"><span aria-hidden="true">${esc(parent.icon)}</span> ${esc(parent.name)}</h2>
+      <p class="pick-cat">Pick a subcategory:</p>
+      <ul class="cat-grid" id="catGrid"><li class="muted">Loading...</li></ul>`;
+    async function load() {
+      const [r] = await Promise.all([api('GET', 'items?type=material'), loadCats().catch(() => {})]);
+      parent = catById(parentId) || parent;
+      const counts = leafCountMap(r.items);
+      const subs = childrenOf(parent.id).filter(c => !c.hidden || counts[c.id]);
+      app.querySelector('#catGrid').innerHTML = subs.length
+        ? subs.map(c => catBtnHTML(c, counts[c.id] || 0, catPath(c.id))).join('')
+        : '<li class="muted">No subcategories yet.</li>';
+    }
     pageRefresh = load;
     await load();
   }
@@ -513,10 +603,20 @@
       if (!cat) { await loadCats(); cat = catById(catId); }
       if (!cat) return go('#/materials');
     }
-    setHeader(cat ? cat.name : (t.title || t.many), cat ? '#/materials' : '#/');
+    // If someone opens a main group via /c/, send them to the subcategory picker.
+    if (cat && isParentCat(cat)) return go(parentPath(cat.id));
+    const parent = cat && cat.parentId ? catById(cat.parentId) : null;
+    const back = cat ? (parent ? parentPath(parent.id) : '#/materials') : '#/';
+    setHeader(cat ? cat.name : (t.title || t.many), back);
     const st = cat ? (searchState['cat:' + cat.id] = searchState['cat:' + cat.id] || { q: '', loc: '' }) : searchState[t.key];
     const addHref = cat ? `#/materials/new?cat=${encodeURIComponent(cat.id)}` : `#/${t.path}/new`;
+    const crumb = cat ? crumbsHTML([
+      { label: 'Materials', href: '#/materials' },
+      ...(parent ? [{ label: parent.name, href: parentPath(parent.id) }] : []),
+      { label: cat.name }
+    ]) : '';
     app.innerHTML = `
+      ${crumb}
       ${cat ? `<h2 class="cat-title"><span aria-hidden="true">${esc(cat.icon)}</span> ${esc(cat.name)}</h2>` : ''}
       <a class="btn btn-primary btn-wide ${t.key}" href="${addHref}">${ICONS.plus}<span>Add ${cat ? 'to ' + esc(cat.name) : t.one}</span></a>
       <div class="filters">
@@ -709,15 +809,21 @@
     const editing = !!item;
     const mat = t.key === 'material';
     if (mat) await loadCats().catch(() => {});
-    const startCat = mat ? (editing ? (catById(item.categoryId) || otherCat()) : (catById(query.cat) || otherCat())) : null;
-    setHeader(editing ? 'Edit ' + t.one : 'Add ' + t.one, editing ? `#/${t.path}/${encodeURIComponent(id)}` : (mat ? (query.cat ? catPath(startCat.id) : '#/materials') : '#/' + t.path));
-    const catChoices = mat ? (S.cats || []).filter(c => !c.hidden || c.id === startCat.id) : [];
+    let startCat = mat ? (editing ? (catById(item.categoryId) || otherCat()) : (catById(query.cat) || otherCat())) : null;
+    if (mat && startCat && isParentCat(startCat)) {
+      const first = childrenOf(startCat.id).find(c => !c.hidden) || otherCat();
+      startCat = first;
+    }
+    const formBack = mat
+      ? (editing ? `#/${t.path}/${encodeURIComponent(id)}` : (query.cat ? (catById(query.cat) && isParentCat(catById(query.cat)) ? parentPath(query.cat) : catPath(startCat.id)) : '#/materials'))
+      : '#/' + t.path;
+    setHeader(editing ? 'Edit ' + t.one : 'Add ' + t.one, editing ? `#/${t.path}/${encodeURIComponent(id)}` : formBack);
     const data = { photoPreview: item ? item.photoUrl : '', newPhoto: null, removePhoto: false };
     const v = item || { name: '', quantity: 1, location: '', description: '', meterUnit: 'hours' };
     app.innerHTML = `
       <form class="form" id="itemForm" novalidate>
         ${mat ? `<div class="field"><label for="f-cat">Category</label>
-          <select id="f-cat" class="form-select big">${catChoices.map(c => `<option value="${esc(c.id)}" ${c.id === startCat.id ? 'selected' : ''}>${esc(c.icon)}  ${esc(c.name)}</option>`).join('')}</select></div>` : ''}
+          <select id="f-cat" class="form-select big">${catOptionsHTML(startCat.id)}</select></div>` : ''}
         <div class="field">
           <label for="f-name">Name <span class="req">(required)</span></label>
           <input id="f-name" type="text" maxlength="120" autocomplete="off" autocapitalize="sentences"
@@ -847,23 +953,36 @@
     const counts = {};
     r.items.forEach(i => { counts[i.categoryId] = (counts[i.categoryId] || 0) + 1; });
     const defs = S.fieldDefs || {};
+    // Display order: each main, then its children indented; then orphan leaves.
+    const ordered = [];
+    const seen = new Set();
+    for (const m of mainCats()) {
+      ordered.push(m); seen.add(m.id);
+      for (const ch of childrenOf(m.id)) { ordered.push(ch); seen.add(ch.id); }
+    }
+    for (const c of S.cats) if (!seen.has(c.id)) ordered.push(c);
     app.innerHTML = `
       <a class="btn btn-primary btn-wide material" href="#/categories/new">${ICONS.plus}<span>Add a category</span></a>
-      <p class="hint mt">Tap a category to rename it, change its icon or extra fields, or hide it. Use the arrows to change the order on the Materials page.</p>
+      <p class="hint mt">Tap a category to rename it, change its icon, pick a parent (main group), or hide it. Use the arrows to change the order.</p>
       <ul class="mc-list" id="mcList">
-        ${S.cats.map((c, i) => `<li class="mc-row ${c.hidden ? 'is-hidden' : ''}" data-id="${esc(c.id)}">
+        ${ordered.map((c, i) => {
+          const n = isParentCat(c) ? childrenOf(c.id).reduce((s, ch) => s + (counts[ch.id] || 0), 0) : (counts[c.id] || 0);
+          const parentLabel = c.parentId && catById(c.parentId) ? ` · under ${catById(c.parentId).name}` : (isParentCat(c) ? ' · main group' : '');
+          return `<li class="mc-row ${c.hidden ? 'is-hidden' : ''} ${c.parentId ? 'is-child' : ''} ${isParentCat(c) ? 'is-parent' : ''}" data-id="${esc(c.id)}">
           <a class="mc-main" href="#/categories/${encodeURIComponent(c.id)}">
             <span class="mc-icon" aria-hidden="true">${esc(c.icon)}</span>
             <span class="mc-text"><b>${esc(c.name)}</b>
-              <small>${counts[c.id] || 0} ${counts[c.id] === 1 ? 'item' : 'items'}${c.hidden ? ' · <span class="hid-tag">Hidden</span>' : ''}${c.fields.length ? ' · Extra: ' + esc(c.fields.map(k => defs[k] ? defs[k].label : k).join(', ')) : ''}</small></span>
+              <small>${n} ${n === 1 ? 'item' : 'items'}${parentLabel}${c.hidden ? ' · <span class="hid-tag">Hidden</span>' : ''}${c.fields && c.fields.length ? ' · Extra: ' + esc(c.fields.map(k => defs[k] ? defs[k].label : k).join(', ')) : ''}</small></span>
           </a>
           <div class="mc-move">
             <button type="button" class="mv" data-mv="-1" aria-label="Move ${esc(c.name)} up" ${i === 0 ? 'disabled' : ''}>▲</button>
-            <button type="button" class="mv" data-mv="1" aria-label="Move ${esc(c.name)} down" ${i === S.cats.length - 1 ? 'disabled' : ''}>▼</button>
-          </div></li>`).join('')}
+            <button type="button" class="mv" data-mv="1" aria-label="Move ${esc(c.name)} down" ${i === ordered.length - 1 ? 'disabled' : ''}>▼</button>
+          </div></li>`;
+        }).join('')}
       </ul>`;
     app.querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', async () => {
-      const ids = S.cats.map(c => c.id), id = b.closest('[data-id]').dataset.id, i = ids.indexOf(id), j = i + Number(b.dataset.mv);
+      const ids = [...app.querySelectorAll('#mcList [data-id]')].map(el => el.dataset.id);
+      const id = b.closest('[data-id]').dataset.id, i = ids.indexOf(id), j = i + Number(b.dataset.mv);
       if (j < 0 || j >= ids.length) return;
       [ids[i], ids[j]] = [ids[j], ids[i]];
       try {
@@ -884,6 +1003,19 @@
     const defs = S.fieldDefs || {}, icons = S.icons || ['📦'];
     const icon = c ? c.icon : '📦';
     const iconList = icons.includes(icon) ? icons : [icon, ...icons];
+    const isOther = c && c.id === 'other';
+    const hasKids = c && isParentCat(c);
+    // Parent choices: main groups only (no parent themselves). Can't nest under self or under a leaf.
+    const parentChoices = (S.cats || []).filter(p => !p.parentId && p.id !== 'other' && (!c || p.id !== c.id) && !p.hidden);
+    const curParent = c ? (c.parentId || '') : '';
+    const parentField = isOther || hasKids ? '' : `
+        <div class="field"><label for="c-parent">Parent (main group)</label>
+          <select id="c-parent" class="form-select">
+            <option value="" ${!curParent ? 'selected' : ''}>— Top level (main group or Other) —</option>
+            ${parentChoices.map(p => `<option value="${esc(p.id)}" ${p.id === curParent ? 'selected' : ''}>${esc(p.icon)}  ${esc(p.name)}</option>`).join('')}
+          </select>
+          <p class="hint">Put this under a main group so it shows as a subcategory on Materials. Leave blank to make it a top-level main group.</p>
+        </div>`;
     app.innerHTML = `
       <form class="form" id="catForm" novalidate>
         <div class="field"><label for="c-name">Name <span class="req">(required)</span></label>
@@ -892,7 +1024,8 @@
           <div class="icon-pick" role="radiogroup" aria-label="Icon">
             ${iconList.map(e => `<label><input type="radio" name="icon" value="${esc(e)}" ${e === icon ? 'checked' : ''}><span aria-hidden="true">${esc(e)}</span></label>`).join('')}
           </div></div>
-        <div class="field"><span class="label">Extra fields <span class="hint">shown when adding items in this category</span></span>
+        ${parentField}
+        <div class="field"><span class="label">Extra fields <span class="hint">shown when adding items in this category (not used on main groups)</span></span>
           ${Object.keys(defs).map(k => `<label class="switch-row"><input type="checkbox" name="fld" value="${k}" ${c && c.fields.includes(k) ? 'checked' : ''}><span class="switch" aria-hidden="true"></span><span>${esc(defs[k].label)}${defs[k].kind === 'length' ? ' (ft / m)' : ''}</span></label>`).join('')}
         </div>
         ${c && c.id !== 'other' ? `<div class="field"><label class="switch-row"><input type="checkbox" id="c-hidden" ${c.hidden ? 'checked' : ''}><span class="switch" aria-hidden="true"></span><span>Hide this category</span></label>
@@ -911,6 +1044,8 @@
         icon: (f.querySelector('input[name=icon]:checked') || {}).value || '📦',
         fields: [...f.querySelectorAll('input[name=fld]:checked')].map(i => i.value)
       };
+      const parentSel = f.querySelector('#c-parent');
+      if (parentSel) body.parentId = parentSel.value || null;
       const hid = f.querySelector('#c-hidden'); if (hid) body.hidden = hid.checked;
       if (!body.name) return showError(f.querySelector('#catErr'), 'Please type a name.');
       withBusy(f.querySelector('#catBtn'), async () => {
@@ -1820,6 +1955,7 @@
       else if (parts[0] === 'notifications') await renderNotifications();
       else if (parts[0] === 'requests') await renderMyRequests();
       else if (parts[0] === 'categories') parts[1] ? await renderCategoryForm(parts[1] === 'new' ? null : parts[1]) : await renderCategories();
+      else if (parts[0] === 'materials' && parts[1] === 'p') await renderParentSubs(parts[2]);
       else if (parts[0] === 'materials' && parts[1] === 'c') await renderList(TYPES.material, parts[2]);
       else if (parts[0] === 'equipment' && parts[1] && parts[1] !== 'new' && parts[2] && parts[2] !== 'edit') {
         const [p0, q] = location.hash.split('?');

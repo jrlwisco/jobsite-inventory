@@ -567,3 +567,13 @@ main {
 }
 .cat-thumb { font-size: 2.3rem; display: flex; align-items: center; justify-content: center; }
 .cat-photo { font-size: 4rem; line-height: 1; }
+
+/* ---------- v2.4 main / subcategory hierarchy ---------- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0 0 10px; font-size: .95rem; font-weight: 700; }
+.crumb { color: var(--mat); text-decoration: none; }
+a.crumb:active { opacity: .7; }
+.crumb.current { color: var(--ink); font-weight: 800; }
+.crumb-sep { color: var(--muted); font-weight: 700; }
+.mc-row.is-child .mc-main { padding-left: 28px; }
+.mc-row.is-parent { border-color: var(--mat); }
+.mc-row.is-parent .mc-text b { color: var(--mat); }

@@ -1,6 +1,7 @@
 'use strict';
 // Material categories, extra per-category fields, and quantity units.
 // The SEED list is only used the first time (database upgrade); after that admins manage categories in the app.
+// Hierarchy: parent mains (parent_id NULL) → leaf subs; "other" is a top-level leaf with no parent.
 
 // Extra fields a category can have. "choice" fields show a dropdown with an "Other (type it)" choice.
 const FIELD_DEFS = {
@@ -39,46 +40,150 @@ const UNITS = ['each', 'pieces', 'bags', 'boxes', 'bundles', 'rolls', 'sheets', 
 // Icons admins can pick from (emoji: show in color on every phone, no downloads needed).
 const ICONS = ['🚜', '🪨', '🪣', '🧱', '#️⃣', '🏗️', '🛣️', '🌉', '🚧', '🌧️', '💧', '🌾', '🪵', '🏠', '🏘️', '🌡️', '🚪', '⬜',
   '🔲', '🖌️', '🚰', '🌬️', '⚡', '📶', '🧯', '🔩', '🧴', '🦺', '🌳', '📦', '🔧', '🔨', '⛏️', '🪚', '🪜', '🧰', '📐', '📏',
-  '⚙️', '🔗', '🛢️', '🪟', '🛁', '💡', '🔌', '🧪', '🏭', '🚛', '⛽', '🧲'];
+  '⚙️', '🔗', '🛢️', '🪟', '🛁', '💡', '🔌', '🧪', '🏭', '🚛', '⛽', '🧲', '🌍'];
 
 const W = ['length', 'wireGauge', 'wireType'], LV = ['length', 'cableType'], P = ['length', 'pipeSize', 'pipeMaterial'];
-// [id, name, icon, fields]
+
+// Parent main groups (id, name, icon). Sort order = position among mains.
+const PARENT_SEED = [
+  ['site-dirt', 'Site, Dirt & Landscaping', '🌍'],
+  ['concrete-metals', 'Concrete, Masonry & Metals', '🧱'],
+  ['roads-paving', 'Roads, Paving & Traffic', '🛣️'],
+  ['underground', 'Underground Utilities', '💧'],
+  ['building-shell', 'Building Structure & Shell', '🏠'],
+  ['interior', 'Interior Finishes', '🖌️'],
+  ['mep', 'MEP', '⚡'],
+  ['hardware-safety', 'Hardware & Safety', '🦺']
+];
+
+// Leaf categories: [id, name, icon, parentId, fields?]
+// Merges (kept as hidden leftovers, not listed as leaves):
+//   aggregates → site-work; concrete → masonry; roads-bridges → asphalt
 const SEED = [
-  ['site-work', 'Site Work & Earthwork', '🚜'],
-  ['aggregates', 'Aggregates (Stone, Gravel, Sand)', '🪨'],
-  ['concrete', 'Concrete & Cement', '🪣'],
-  ['masonry', 'Masonry (Block, Brick, Stone)', '🧱'],
-  ['rebar', 'Rebar & Reinforcing', '#️⃣'],
-  ['steel', 'Structural Steel & Metals', '🏗️'],
-  ['asphalt', 'Asphalt & Paving', '🛣️'],
-  ['roads-bridges', 'Roads & Bridges', '🌉'],
-  ['traffic', 'Traffic Control & Signage', '🚧'],
-  ['drainage', 'Drainage, Storm & Sewer', '🌧️', P],
-  ['water-utilities', 'Water & Underground Utilities', '💧', P],
-  ['erosion', 'Erosion Control & Geotextiles', '🌾'],
-  ['framing', 'Framing, Lumber & Sheathing', '🪵'],
-  ['roofing', 'Roofing', '🏠'],
-  ['siding', 'Siding & Exterior Finishes', '🏘️'],
-  ['insulation', 'Insulation & Weatherproofing', '🌡️'],
-  ['doors-windows', 'Doors & Windows', '🚪'],
-  ['drywall', 'Drywall & Interior Finishes', '⬜'],
-  ['flooring', 'Flooring & Tile', '🔲'],
-  ['paint', 'Paint, Caulk & Adhesives', '🖌️'],
-  ['plumbing', 'Plumbing', '🚰', P],
-  ['hvac', 'HVAC & Ductwork', '🌬️'],
-  ['electrical', 'Electrical', '⚡', W],
-  ['low-voltage', 'Low Voltage, Data & Communications', '📶', LV],
-  ['fire', 'Fire Protection & Life Safety', '🧯'],
-  ['fasteners', 'Fasteners, Anchors & Hardware', '🔩'],
-  ['safety', 'Safety & PPE', '🦺'],
-  ['landscaping', 'Landscaping', '🌳'],
-  ['other', 'Other / Uncategorized', '📦']
+  ['site-work', 'Site Work, Earthwork & Aggregates', '🚜', 'site-dirt'],
+  ['erosion', 'Erosion Control & Geotextiles', '🌾', 'site-dirt'],
+  ['landscaping', 'Landscaping', '🌳', 'site-dirt'],
+  ['masonry', 'Concrete, Cement & Masonry', '🧱', 'concrete-metals'],
+  ['rebar', 'Rebar & Reinforcing', '#️⃣', 'concrete-metals'],
+  ['steel', 'Structural Steel & Metals', '🏗️', 'concrete-metals'],
+  ['asphalt', 'Asphalt & Paving', '🛣️', 'roads-paving'],
+  ['traffic', 'Traffic Control & Signage', '🚧', 'roads-paving'],
+  ['drainage', 'Drainage, Storm & Sewer', '🌧️', 'underground', P],
+  ['water-utilities', 'Water & Underground Utilities', '💧', 'underground', P],
+  ['framing', 'Framing, Lumber & Sheathing', '🪵', 'building-shell'],
+  ['roofing', 'Roofing', '🏠', 'building-shell'],
+  ['siding', 'Siding & Exterior Finishes', '🏘️', 'building-shell'],
+  ['insulation', 'Insulation & Weatherproofing', '🌡️', 'building-shell'],
+  ['doors-windows', 'Doors & Windows', '🚪', 'building-shell'],
+  ['drywall', 'Drywall & Interior Finishes', '⬜', 'interior'],
+  ['flooring', 'Flooring & Tile', '🔲', 'interior'],
+  ['paint', 'Paint, Caulk & Adhesives', '🖌️', 'interior'],
+  ['plumbing', 'Plumbing', '🚰', 'mep', P],
+  ['hvac', 'HVAC & Ductwork', '🌬️', 'mep'],
+  ['electrical', 'Electrical', '⚡', 'mep', W],
+  ['low-voltage', 'Low Voltage, Data & Communications', '📶', 'mep', LV],
+  ['fire', 'Fire Protection & Life Safety', '🧯', 'mep'],
+  ['fasteners', 'Fasteners, Anchors & Hardware', '🔩', 'hardware-safety'],
+  ['safety', 'Safety & PPE', '🦺', 'hardware-safety'],
+  ['other', 'Other / Uncategorized', '📦', null],
+  // Hidden leftovers (kept so old DBs / backups still resolve; never listed as active leaves)
+  ['aggregates', 'Aggregates (Stone, Gravel, Sand)', '🪨', 'site-dirt'],
+  ['concrete', 'Concrete & Cement', '🪣', 'concrete-metals'],
+  ['roads-bridges', 'Roads & Bridges', '🌉', 'roads-paving']
 ];
 const OTHER_ID = 'other';
+const HIDDEN_SEED_IDS = new Set(['aggregates', 'concrete', 'roads-bridges']);
 
 function seedCategories(db, t) {
-  const ins = db.prepare('INSERT OR IGNORE INTO categories (id, name, icon, sort, hidden, fields, created_at) VALUES (?,?,?,?,0,?,?)');
-  SEED.forEach(([id, name, icon, fields], i) => ins.run(id, name, icon, (i + 1) * 10, JSON.stringify(fields || []), t));
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,?,?,?,?)'
+  );
+  PARENT_SEED.forEach(([id, name, icon], i) => {
+    ins.run(id, name, icon, (i + 1) * 100, 0, '[]', t, null);
+  });
+  SEED.forEach(([id, name, icon, parentId, fields], i) => {
+    const hidden = HIDDEN_SEED_IDS.has(id) ? 1 : 0;
+    // other last; hidden leftovers after active leaves but before other in sort space
+    const sort = id === OTHER_ID ? 9000 : HIDDEN_SEED_IDS.has(id) ? 8000 + i : (i + 1) * 10;
+    ins.run(id, name, icon, sort, hidden, JSON.stringify(fields || []), t, parentId || null);
+  });
 }
 
-module.exports = { FIELD_DEFS, FIELD_KEYS, UNITS, ICONS, SEED, OTHER_ID, seedCategories };
+/** Apply hierarchy renames/merges on an existing DB (idempotent). */
+function applyHierarchyV5(db, t) {
+  // Ensure parents exist
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,0,?,?,?)'
+  );
+  PARENT_SEED.forEach(([id, name, icon], i) => {
+    ins.run(id, name, icon, (i + 1) * 100, '[]', t, null);
+    db.prepare('UPDATE categories SET name = ?, icon = ?, parent_id = NULL, hidden = 0 WHERE id = ?').run(name, icon, id);
+  });
+
+  // Active leaves: names, parents, unhide
+  const leafUpserts = [
+    ['site-work', 'Site Work, Earthwork & Aggregates', '🚜', 'site-dirt'],
+    ['erosion', 'Erosion Control & Geotextiles', '🌾', 'site-dirt'],
+    ['landscaping', 'Landscaping', '🌳', 'site-dirt'],
+    ['masonry', 'Concrete, Cement & Masonry', '🧱', 'concrete-metals'],
+    ['rebar', 'Rebar & Reinforcing', '#️⃣', 'concrete-metals'],
+    ['steel', 'Structural Steel & Metals', '🏗️', 'concrete-metals'],
+    ['asphalt', 'Asphalt & Paving', '🛣️', 'roads-paving'],
+    ['traffic', 'Traffic Control & Signage', '🚧', 'roads-paving'],
+    ['drainage', 'Drainage, Storm & Sewer', '🌧️', 'underground'],
+    ['water-utilities', 'Water & Underground Utilities', '💧', 'underground'],
+    ['framing', 'Framing, Lumber & Sheathing', '🪵', 'building-shell'],
+    ['roofing', 'Roofing', '🏠', 'building-shell'],
+    ['siding', 'Siding & Exterior Finishes', '🏘️', 'building-shell'],
+    ['insulation', 'Insulation & Weatherproofing', '🌡️', 'building-shell'],
+    ['doors-windows', 'Doors & Windows', '🚪', 'building-shell'],
+    ['drywall', 'Drywall & Interior Finishes', '⬜', 'interior'],
+    ['flooring', 'Flooring & Tile', '🔲', 'interior'],
+    ['paint', 'Paint, Caulk & Adhesives', '🖌️', 'interior'],
+    ['plumbing', 'Plumbing', '🚰', 'mep'],
+    ['hvac', 'HVAC & Ductwork', '🌬️', 'mep'],
+    ['electrical', 'Electrical', '⚡', 'mep'],
+    ['low-voltage', 'Low Voltage, Data & Communications', '📶', 'mep'],
+    ['fire', 'Fire Protection & Life Safety', '🧯', 'mep'],
+    ['fasteners', 'Fasteners, Anchors & Hardware', '🔩', 'hardware-safety'],
+    ['safety', 'Safety & PPE', '🦺', 'hardware-safety']
+  ];
+  const upd = db.prepare('UPDATE categories SET name = ?, icon = ?, parent_id = ?, hidden = 0 WHERE id = ?');
+  leafUpserts.forEach(([id, name, icon, parentId], i) => {
+    // Insert if a brand-new install somehow skipped seed; ignore if missing on weird DBs
+    const row = db.prepare('SELECT id FROM categories WHERE id = ?').get(id);
+    if (row) upd.run(name, icon, parentId, id);
+    else {
+      db.prepare(
+        'INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,0,?,?,?)'
+      ).run(id, name, icon, (i + 1) * 10, '[]', t, parentId);
+    }
+  });
+
+  // other stays top-level leaf
+  db.prepare("UPDATE categories SET name = 'Other / Uncategorized', icon = '📦', parent_id = NULL, hidden = 0, sort = 9000 WHERE id = ?").run(OTHER_ID);
+
+  // Migrate items from merged categories into the keepers
+  const migrate = [
+    ['aggregates', 'site-work'],
+    ['concrete', 'masonry'],
+    ['roads-bridges', 'asphalt']
+  ];
+  for (const [from, to] of migrate) {
+    db.prepare('UPDATE items SET category_id = ? WHERE category_id = ?').run(to, from);
+  }
+
+  // Hide merged leftovers (keep rows for old backups / foreign refs)
+  for (const [from, parentGuess] of [
+    ['aggregates', 'site-dirt'],
+    ['concrete', 'concrete-metals'],
+    ['roads-bridges', 'roads-paving']
+  ]) {
+    const row = db.prepare('SELECT id FROM categories WHERE id = ?').get(from);
+    if (row) {
+      db.prepare('UPDATE categories SET hidden = 1, parent_id = ? WHERE id = ?').run(parentGuess, from);
+    }
+  }
+}
+
+module.exports = { FIELD_DEFS, FIELD_KEYS, UNITS, ICONS, SEED, PARENT_SEED, OTHER_ID, HIDDEN_SEED_IDS, seedCategories, applyHierarchyV5 };

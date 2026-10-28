@@ -699,7 +699,7 @@ app.get('/api/backup', adminOnly, (req, res) => {
   }));
   const d = new Date().toISOString().slice(0, 10);
   res.set('Content-Disposition', `attachment; filename="inventory-backup-${d}.json"`);
-  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 4, exportedAt: new Date().toISOString(), settings: settingsObj(), categories: cats.exportCats(), users, items, equipment: equipment.exportData() }));
+  res.type('application/json').send(JSON.stringify({ app: 'jobsite-inventory', version: 5, exportedAt: new Date().toISOString(), settings: settingsObj(), categories: cats.exportCats(), users, items, equipment: equipment.exportData() }));
 });
 
 app.post('/api/restore', adminOnly, (req, res) => {

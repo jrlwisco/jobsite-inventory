@@ -1,11 +1,17 @@
 'use strict';
 // Material categories (admin-managed), quantity units, and generic per-category extra fields.
+// Hierarchy: parent mains (parent_id null, have children) → leaf subs; items live on leaves (and "other").
 const { FIELD_DEFS, FIELD_KEYS, UNITS, ICONS, OTHER_ID } = require('./catalog');
 
 module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError, now, getItem, itemOut, recordEvent, fmtNum }) {
   const catRow = id => (id ? db.prepare('SELECT * FROM categories WHERE id = ?').get(String(id)) : null);
   const parseFields = s => { try { const f = JSON.parse(s || '[]'); return Array.isArray(f) ? f.filter(k => FIELD_KEYS.includes(k)) : []; } catch (e) { return []; } };
-  const catOut = c => ({ id: c.id, name: c.name, icon: c.icon, sort: c.sort, hidden: !!c.hidden, fields: parseFields(c.fields) });
+  const childCount = id => db.prepare('SELECT COUNT(*) n FROM categories WHERE parent_id = ?').get(id).n;
+  const catOut = c => ({
+    id: c.id, name: c.name, icon: c.icon, sort: c.sort, hidden: !!c.hidden,
+    fields: parseFields(c.fields), parentId: c.parent_id || null,
+    isParent: childCount(c.id) > 0
+  });
   const allCats = () => db.prepare('SELECT * FROM categories ORDER BY sort, name COLLATE NOCASE').all().map(catOut);
   const parseExtra = s => { try { const e = JSON.parse(s || '{}'); return e && typeof e === 'object' ? e : {}; } catch (e) { return {}; } };
 
@@ -33,10 +39,12 @@ module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError,
     return out;
   }
   // Category, unit and extra values for a material (null for tools/equipment).
+  // Items belong on leaves (or top-level "other"); if a parent is picked, refuse.
   function readMaterial(body, type, old) {
     if (type !== 'material') return null;
     let cat = catRow(body.categoryId !== undefined ? body.categoryId : old && old.category_id);
-    if (!cat) cat = catRow(OTHER_ID) || { id: OTHER_ID, fields: '[]' };
+    if (!cat) cat = catRow(OTHER_ID) || { id: OTHER_ID, fields: '[]', parent_id: null };
+    if (childCount(cat.id) > 0) throw bad('Pick a subcategory, not a main group.');
     const unit = UNITS.includes(body.unit) ? body.unit : (body.unit === undefined && old ? (old.unit || 'each') : 'each');
     const extra = readExtra(body.extra !== undefined ? body.extra : parseExtra(old && old.extra), parseFields(cat.fields));
     return { categoryId: cat.id, unit, extra };
@@ -62,6 +70,19 @@ module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError,
     return { categoryId: c ? c.id : OTHER_ID, categoryName: c ? c.name : 'Other / Uncategorized', categoryIcon: c ? c.icon : '📦', unit: r.unit || 'each', extra: parseExtra(r.extra) };
   }
 
+  function resolveParentId(raw, selfId) {
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '' || raw === false) return null;
+    const pid = String(raw);
+    if (selfId && pid === selfId) throw bad("A category can't be its own parent.");
+    const p = catRow(pid);
+    if (!p) throw bad('That parent category was not found.');
+    if (p.parent_id) throw bad('Pick a main group as the parent (only two levels).');
+    if (selfId && childCount(selfId) > 0) throw bad("A main group with subcategories can't be moved under another group.");
+    if (pid === OTHER_ID) throw bad('"Other / Uncategorized" can\'t be a parent.');
+    return pid;
+  }
+
   // ----- API -----
   app.get('/api/categories', auth, (req, res) => res.json({ categories: allCats(), fieldDefs: FIELD_DEFS, units: UNITS, icons: ICONS }));
 
@@ -76,10 +97,12 @@ module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError,
     const v = readCatBody(req.body);
     let base = v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'category', id = base, n = 2;
     while (catRow(id)) id = `${base}-${n++}`;
+    const parentId = resolveParentId(req.body.parentId === undefined ? null : req.body.parentId, null);
     // New categories go just above "Other / Uncategorized".
     const other = catRow(OTHER_ID);
     const maxSort = db.prepare('SELECT MAX(sort) m FROM categories WHERE id != ?').get(OTHER_ID).m || 0;
-    db.prepare('INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at) VALUES (?,?,?,?,0,?,?)').run(id, v.name, v.icon, maxSort + 10, JSON.stringify(v.fields), now());
+    db.prepare('INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,0,?,?,?)')
+      .run(id, v.name, v.icon, maxSort + 10, JSON.stringify(v.fields), now(), parentId);
     if (other && other.sort <= maxSort + 10) db.prepare('UPDATE categories SET sort = ? WHERE id = ?').run(maxSort + 20, OTHER_ID);
     res.status(201).json({ category: catOut(catRow(id)), categories: allCats() });
   });
@@ -89,7 +112,13 @@ module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError,
     const v = readCatBody({ name: req.body.name ?? c.name, icon: req.body.icon ?? c.icon, fields: req.body.fields ?? parseFields(c.fields) }, c.id);
     const hidden = req.body.hidden === undefined ? !!c.hidden : !!req.body.hidden;
     if (hidden && c.id === OTHER_ID) throw bad('"Other / Uncategorized" can\'t be hidden: it catches everything without a category.');
-    db.prepare('UPDATE categories SET name = ?, icon = ?, fields = ?, hidden = ? WHERE id = ?').run(v.name, v.icon, JSON.stringify(v.fields), hidden ? 1 : 0, c.id);
+    let parentId = c.parent_id || null;
+    if (req.body.parentId !== undefined) {
+      if (c.id === OTHER_ID) throw bad('"Other / Uncategorized" stays at the top level.');
+      parentId = resolveParentId(req.body.parentId, c.id);
+    }
+    db.prepare('UPDATE categories SET name = ?, icon = ?, fields = ?, hidden = ?, parent_id = ? WHERE id = ?')
+      .run(v.name, v.icon, JSON.stringify(v.fields), hidden ? 1 : 0, parentId, c.id);
     res.json({ category: catOut(catRow(c.id)), categories: allCats() });
   });
   app.post('/api/categories/order', adminOnly, (req, res) => {
@@ -130,9 +159,15 @@ module.exports = function setup({ app, db, auth, adminOnly, str, bad, HttpError,
         const name = str(c.name, { max: 60, required: true, label: 'Name' });
         const clash = db.prepare('SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND id != ?').get(name, id);
         if (clash) continue;
-        db.prepare(`INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at) VALUES (?,?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET name=excluded.name, icon=excluded.icon, sort=excluded.sort, hidden=excluded.hidden, fields=excluded.fields`)
-          .run(id, name, str(c.icon, { max: 16 }) || '📦', Number(c.sort) || 0, c.hidden && id !== OTHER_ID ? 1 : 0, JSON.stringify(cleanFields(c.fields)), now());
+        let parentId = null;
+        if (c.parentId) {
+          const p = String(c.parentId).slice(0, 60);
+          // Parent may be imported in the same batch; allow the id even if not yet present.
+          parentId = p === id ? null : p;
+        }
+        db.prepare(`INSERT INTO categories (id, name, icon, sort, hidden, fields, created_at, parent_id) VALUES (?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET name=excluded.name, icon=excluded.icon, sort=excluded.sort, hidden=excluded.hidden, fields=excluded.fields, parent_id=excluded.parent_id`)
+          .run(id, name, str(c.icon, { max: 16 }) || '📦', Number(c.sort) || 0, c.hidden && id !== OTHER_ID ? 1 : 0, JSON.stringify(cleanFields(c.fields)), now(), parentId);
         n++;
       } catch (e) { if (!(e instanceof HttpError)) throw e; }
     }

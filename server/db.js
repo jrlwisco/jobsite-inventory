@@ -220,7 +220,8 @@ function openDb(dataDir) {
         CREATE TABLE categories (
           id TEXT PRIMARY KEY, name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '📦',
           sort INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0,
-          fields TEXT NOT NULL DEFAULT '[]', created_at INTEGER
+          fields TEXT NOT NULL DEFAULT '[]', created_at INTEGER,
+          parent_id TEXT
         );
         ALTER TABLE items ADD COLUMN category_id TEXT;
         ALTER TABLE items ADD COLUMN unit TEXT NOT NULL DEFAULT 'each';
@@ -230,6 +231,18 @@ function openDb(dataDir) {
       seedCategories(db, Date.now());
       db.prepare("UPDATE items SET category_id = ? WHERE type = 'material' AND category_id IS NULL").run(OTHER_ID);
       db.pragma('user_version = 4');
+    })();
+  }
+  if (db.pragma('user_version', { simple: true }) < 5) {
+    // v2.4: main/subcategory hierarchy (parent_id), merge aggregates→site-work, concrete→masonry, roads-bridges→asphalt.
+    const { applyHierarchyV5 } = require('./catalog');
+    db.transaction(() => {
+      const cols = db.prepare("PRAGMA table_info(categories)").all().map(c => c.name);
+      if (!cols.includes('parent_id')) {
+        db.exec('ALTER TABLE categories ADD COLUMN parent_id TEXT');
+      }
+      applyHierarchyV5(db, Date.now());
+      db.pragma('user_version = 5');
     })();
   }
   return db;
